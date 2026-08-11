@@ -519,7 +519,7 @@ git commit -m "chore: add backend Dockerfile"
     "test": "vitest run"
   },
   "dependencies": {
-    "next": "14.2.15",
+    "next": "14.2.35",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
