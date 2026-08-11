@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+
+# Node
+node_modules/
+.next/
+
+# Env / local overrides
+.env
+docker-compose.override.yml
+
+# OS
+.DS_Store
