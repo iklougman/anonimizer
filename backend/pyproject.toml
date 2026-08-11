@@ -47,4 +47,4 @@ forbidden_modules = ["app.api", "app.llm_gateway"]
 name = "Privacy gateway must not be network-capable"
 type = "forbidden"
 source_modules = ["app.privacy_gateway"]
-forbidden_modules = ["httpx", "requests", "aiohttp", "urllib3"]
+forbidden_modules = ["httpx", "requests", "aiohttp", "urllib3", "socket", "urllib", "http", "ftplib", "smtplib", "telnetlib"]
