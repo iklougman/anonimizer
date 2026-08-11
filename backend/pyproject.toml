@@ -32,3 +32,19 @@ testpaths = ["tests"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.importlinter]
+root_package = "app"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "Privacy gateway must not import API or LLM gateway layers"
+type = "forbidden"
+source_modules = ["app.privacy_gateway"]
+forbidden_modules = ["app.api", "app.llm_gateway"]
+
+[[tool.importlinter.contracts]]
+name = "Privacy gateway must not be network-capable"
+type = "forbidden"
+source_modules = ["app.privacy_gateway"]
+forbidden_modules = ["httpx", "requests", "aiohttp", "urllib3"]
