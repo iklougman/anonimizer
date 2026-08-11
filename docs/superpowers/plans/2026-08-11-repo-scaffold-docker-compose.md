@@ -17,7 +17,7 @@ the `privacy_gateway/` isolation rule is added in this plan, before any code
 exists to violate it, so every later plan is checked against it from day one.
 
 **Tech Stack:** Python 3.12, FastAPI, pydantic-settings v2, pytest, ruff,
-import-linter; Node 20, Next.js 14 (App Router), TypeScript, vitest; Postgres
+import-linter; Node 20, Next.js 16 (App Router), TypeScript, vitest; Postgres
 16, Keycloak 24, Ollama; Docker Compose; GitHub Actions.
 
 ## Global Constraints
@@ -406,7 +406,7 @@ forbidden_modules = ["app.api", "app.llm_gateway"]
 name = "Privacy gateway must not be network-capable"
 type = "forbidden"
 source_modules = ["app.privacy_gateway"]
-forbidden_modules = ["httpx", "requests", "aiohttp", "urllib3"]
+forbidden_modules = ["httpx", "requests", "aiohttp", "urllib3", "socket", "urllib", "http", "ftplib", "smtplib", "telnetlib"]
 ```
 
 - [ ] **Step 2: Run the linter to verify it passes on the current (empty) tree**
@@ -519,15 +519,15 @@ git commit -m "chore: add backend Dockerfile"
     "test": "vitest run"
   },
   "dependencies": {
-    "next": "14.2.35",
-    "react": "18.3.1",
-    "react-dom": "18.3.1"
+    "next": "16.3.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "typescript": "5.6.3",
-    "@types/node": "20.16.11",
-    "@types/react": "18.3.11",
-    "@types/react-dom": "18.3.0",
+    "typescript": "7.0.2",
+    "@types/node": "20.19.43",
+    "@types/react": "19.2.18",
+    "@types/react-dom": "19.2.4",
     "vitest": "2.1.3"
   }
 }
@@ -771,7 +771,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -787,12 +787,12 @@ services:
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
     ports:
-      - "8080:8080"
+      - "127.0.0.1:8080:8080"
 
   ollama:
     image: ollama/ollama:latest
     ports:
-      - "11434:11434"
+      - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
 
@@ -802,7 +802,7 @@ services:
       ENVIRONMENT: ${ENVIRONMENT}
       LOG_LEVEL: ${LOG_LEVEL}
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -810,7 +810,7 @@ services:
   frontend:
     build: ./frontend
     ports:
-      - "3000:3000"
+      - "127.0.0.1:3000:3000"
     depends_on:
       - backend
 
