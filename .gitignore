@@ -2,13 +2,18 @@
 __pycache__/
 *.pyc
 .venv/
+venv/
 .pytest_cache/
 .ruff_cache/
 *.egg-info/
+.coverage
+htmlcov/
 
 # Node
 node_modules/
 .next/
+next-env.d.ts
+*.tsbuildinfo
 
 # Env / local overrides
 .env
