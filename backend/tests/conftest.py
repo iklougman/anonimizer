@@ -9,6 +9,7 @@ os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+psycopg://chatgpt_proxy:change-me@localhost:5432/chatgpt_proxy",
 )
+os.environ.setdefault("APP_RUNTIME_PASSWORD", "change-me-app-runtime")
 
 _master_key_file = tempfile.NamedTemporaryFile(delete=False)
 _master_key_file.write(os.urandom(32))
