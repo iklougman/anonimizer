@@ -9,6 +9,21 @@ from app.privacy_gateway.token_vault.key_provider import KeyProvider
 
 
 class TenantRepository:
+    """The one repository that is deliberately NOT tenant-scoped.
+
+    Every other repository takes `tenant_id` as its mandatory first argument and is
+    driven from a `tenant_scoped_session()`. This one cannot be: creating a tenant is
+    what brings a tenant into existence, so there is no tenant context to open a scoped
+    session with at the time `create()` runs. Callers therefore pass a plain
+    `SessionLocal()` session.
+
+    `create()` sets `app.current_tenant_id` itself, immediately after flushing the new
+    `tenants` row and before inserting the first `tenant_keys` row — `tenant_keys` is
+    tenant-scoped and RLS-protected, so its INSERT would otherwise fail the
+    `tenant_isolation` WITH CHECK policy. Do not "simplify" this by moving tenant
+    creation into `tenant_scoped_session()`; the chicken-and-egg ordering is the point.
+    """
+
     def __init__(self, session: Session, key_provider: KeyProvider) -> None:
         self.session = session
         self.key_provider = key_provider

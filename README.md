@@ -18,6 +18,27 @@ constitute GDPR compliance (see design doc §1).
 4. Backend health check: `curl http://localhost:8000/health`
 5. Frontend health check: `curl http://localhost:3000/api/healthz`
 
+### Changing `APP_RUNTIME_PASSWORD`
+
+The restricted `app_runtime` Postgres role that the application connects as is
+created (and its password set) by migration `0003`. Alembic will not re-run a
+migration it has already applied, so **changing `APP_RUNTIME_PASSWORD` in `.env`
+and restarting is not enough** — the role keeps its old password and the backend
+fails to authenticate.
+
+To roll the password, re-run `0003`'s upgrade logic against the database:
+
+```bash
+cd backend
+export APP_RUNTIME_PASSWORD=<the new password>
+alembic downgrade 0002 && alembic upgrade head
+```
+
+`0003`'s upgrade is written to `ALTER ROLE ... PASSWORD` when the role already
+exists, so this is safe to repeat. Note that its downgrade drops the
+`app_runtime` role, so no application process should be connected while this
+runs.
+
 ## Backend tests
 
 Requires a running Postgres (`docker compose up -d postgres`) and the

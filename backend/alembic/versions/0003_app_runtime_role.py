@@ -41,9 +41,12 @@ TENANT_SCOPED_TABLES = [
 def upgrade() -> None:
     escaped_password = get_settings().app_runtime_password.replace("'", "''")
 
+    # Dollar-quote tag is deliberately not the bare `$$`: the password is interpolated
+    # into this block, and a password containing the literal substring `$$` would
+    # otherwise terminate the block early.
     op.execute(
         f"""
-        DO $$
+        DO $migration_role_body$
         BEGIN
             IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_runtime') THEN
                 CREATE ROLE app_runtime LOGIN PASSWORD '{escaped_password}'
@@ -53,7 +56,7 @@ def upgrade() -> None:
                     PASSWORD '{escaped_password}';
             END IF;
         END
-        $$;
+        $migration_role_body$;
         """
     )
 

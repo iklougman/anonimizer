@@ -3,6 +3,9 @@ services:
     volumes:
       - ./backend/app:/app/app
       - ./backend/tests:/app/tests
+      # Required: the command below runs `alembic upgrade head` on every start, so a
+      # migration added during development must be visible without an image rebuild.
+      - ./backend/alembic:/app/alembic
     command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
   frontend:

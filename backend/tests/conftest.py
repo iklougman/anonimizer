@@ -1,3 +1,4 @@
+import atexit
 import os
 import tempfile
 
@@ -11,10 +12,22 @@ os.environ.setdefault(
 )
 os.environ.setdefault("APP_RUNTIME_PASSWORD", "change-me-app-runtime")
 
+# Created at import time (not as a fixture) because MASTER_KEY_PATH must be set before
+# `app.config` is imported below. `delete=False` is required so the file survives being
+# closed here, so it is unlinked explicitly at interpreter exit instead of being leaked
+# into the system temp directory on every test run.
 _master_key_file = tempfile.NamedTemporaryFile(delete=False)
 _master_key_file.write(os.urandom(32))
 _master_key_file.close()
 os.environ.setdefault("MASTER_KEY_PATH", _master_key_file.name)
+
+
+@atexit.register
+def _remove_master_key_file() -> None:
+    try:
+        os.unlink(_master_key_file.name)
+    except OSError:
+        pass
 
 from app.config import get_settings  # noqa: E402
 

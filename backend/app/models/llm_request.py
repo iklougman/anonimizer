@@ -1,3 +1,4 @@
+import decimal
 import uuid
 from datetime import datetime
 
@@ -38,6 +39,8 @@ class LLMRequest(Base):
     sanitized_response: Mapped[str] = mapped_column(Text, nullable=False)
     tokens_in: Mapped[int] = mapped_column(Integer, nullable=False)
     tokens_out: Mapped[int] = mapped_column(Integer, nullable=False)
-    cost_usd: Mapped[float] = mapped_column(Numeric(10, 6), nullable=False)
+    # Decimal, not float: SQLAlchemy returns Decimal for Numeric columns, and annotating
+    # this as float would invite precision-losing float() conversions on a money value.
+    cost_usd: Mapped[decimal.Decimal] = mapped_column(Numeric(10, 6), nullable=False)
     latency_ms: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
