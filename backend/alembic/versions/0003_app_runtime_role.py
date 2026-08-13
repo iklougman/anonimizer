@@ -49,7 +49,8 @@ def upgrade() -> None:
                 CREATE ROLE app_runtime LOGIN PASSWORD '{escaped_password}'
                     NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
             ELSE
-                ALTER ROLE app_runtime WITH PASSWORD '{escaped_password}';
+                ALTER ROLE app_runtime WITH NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE
+                    PASSWORD '{escaped_password}';
             END IF;
         END
         $$;
