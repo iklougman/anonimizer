@@ -1884,7 +1884,7 @@ import uuid
 import sqlalchemy as sa
 
 from app.db.repositories.tenant_repository import TenantRepository
-from app.db.session import SessionLocal
+from app.db.session import SessionLocal, tenant_scoped_session
 from app.models import TenantKey
 from app.privacy_gateway.token_vault.key_provider import FileSecretKeyProvider
 
@@ -1902,11 +1902,13 @@ def test_create_tenant_provisions_a_dek(tmp_path):
             retention_days=30,
         )
         session.commit()
+        tenant_id = tenant.id
 
-        assert tenant.id is not None
+    assert tenant_id is not None
 
+    with tenant_scoped_session(tenant_id) as session:
         tenant_key = session.execute(
-            sa.select(TenantKey).where(TenantKey.tenant_id == tenant.id)
+            sa.select(TenantKey).where(TenantKey.tenant_id == tenant_id)
         ).scalar_one()
         assert tenant_key.key_version == 1
         assert key_provider.unwrap_dek(tenant_key.wrapped_dek) is not None
@@ -1917,6 +1919,10 @@ def test_get_returns_none_for_unknown_tenant():
         repo = TenantRepository(session, key_provider=None)
         assert repo.get(uuid.uuid4()) is None
 ```
+
+Reading `tenant_key` back through `tenant_scoped_session(tenant_id)`
+rather than continuing on the same raw `SessionLocal()` after commit is
+deliberate, not incidental — see the note after Step 5 for why.
 
 - [ ] **Step 4: Run the test to verify it fails**
 
@@ -1930,6 +1936,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named
 import os
 import uuid
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models import Tenant, TenantKey
@@ -1946,6 +1953,11 @@ class TenantRepository:
         self.session.add(tenant)
         self.session.flush()
 
+        self.session.execute(
+            text("SELECT set_config('app.current_tenant_id', :tid, true)"),
+            {"tid": str(tenant.id)},
+        )
+
         raw_dek = os.urandom(32)
         wrapped_dek = self.key_provider.wrap_dek(raw_dek)
         tenant_key = TenantKey(tenant_id=tenant.id, wrapped_dek=wrapped_dek, key_version=1)
@@ -1957,6 +1969,24 @@ class TenantRepository:
     def get(self, tenant_id: uuid.UUID) -> Tenant | None:
         return self.session.get(Tenant, tenant_id)
 ```
+
+`tenant_keys` is RLS-protected (Task 4b) — `WITH CHECK` rejects the
+`INSERT` unless `app.current_tenant_id` is set for this transaction, even
+though `create()` uses a plain `SessionLocal()` (no
+`tenant_scoped_session`, since the tenant doesn't exist yet when the
+method starts). Once `tenant.id` is known (after `flush()`), setting the
+GUC with `set_config(..., true)` — the same transaction-local form
+`tenant_scoped_session` itself uses — satisfies the policy for the
+`tenant_key` insert that follows, and unwinds automatically at
+commit/rollback exactly like every other transaction-local use of this
+GUC. No pool-level cleanup and no session-scoped (`false`) `set_config`
+are needed: transaction-local is sufficient for the insert, and it means
+this method never risks leaving a real tenant id set on a connection
+returned to the pool. The one consequence is that a plain `SessionLocal()`
+query on the *same* session *after* `commit()` no longer sees the new
+`tenant_key` row (the GUC has already unwound) — callers that need to
+read back what they just created should open a fresh
+`tenant_scoped_session(tenant.id)` instead, as the test above does.
 
 - [ ] **Step 6: Run the test to verify it passes**
 
