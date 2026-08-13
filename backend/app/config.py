@@ -10,6 +10,8 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     debug: bool = False
     cors_allowed_origins: list[str] = Field(default_factory=list)
+    database_url: str
+    master_key_path: str
 
 
 @lru_cache
