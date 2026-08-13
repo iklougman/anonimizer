@@ -1351,7 +1351,14 @@ value via `monkeypatch`).
 
 - [ ] **Step 7: Write the failing test for the role and the RLS fail-closed fix**
 
-`backend/tests/privacy_invariants/test_app_runtime_role.py`:
+`backend/tests/privacy_invariants/test_app_runtime_role.py` — 3 tests as
+written below. **Amended after implementation:** the file ends up with **4**
+tests. A fourth,
+`test_app_runtime_pooled_connection_reused_after_committed_tenant_context_still_returns_zero_rows`,
+was added during the fix round for the pooled-connection GUC bug (a reused
+pooled connection carries a stale `''` rather than an unset GUC, so the
+policy needed the `nullif(..., '')` wrapper — see design spec §4/§8) and was
+never folded back into this task's text.
 
 ```python
 import uuid
@@ -1558,7 +1565,9 @@ Expected: `Running upgrade 0002 -> 0003, provision restricted app_runtime role..
 - [ ] **Step 11: Run the test to verify it passes**
 
 Run: `cd backend && pytest tests/privacy_invariants/test_app_runtime_role.py -v`
-Expected: PASS (3 passed).
+Expected: PASS (3 passed as originally planned; **4 passed** in the final
+state, after the pooled-connection regression test described in Step 7 was
+added during the fix round).
 
 - [ ] **Step 12: Run the full backend test suite**
 

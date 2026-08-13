@@ -206,16 +206,21 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 @contextmanager
 def tenant_scoped_session(tenant_id: uuid.UUID) -> Iterator[Session]:
     with SessionLocal() as session:
-        session.execute(
-            text("SELECT set_config('app.current_tenant_id', :tid, true)"),
-            {"tid": str(tenant_id)},
-        )
+        def _set_tenant_context(session, transaction, connection):
+            connection.execute(
+                text("SELECT set_config('app.current_tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+
+        event.listen(session, "after_begin", _set_tenant_context)
         try:
             yield session
             session.commit()
         except Exception:
             session.rollback()
             raise
+        finally:
+            event.remove(session, "after_begin", _set_tenant_context)
 ```
 
 `set_config(..., true)` (the `is_local` third argument) is the
@@ -226,10 +231,23 @@ and has identical transaction-scoping semantics (found during
 implementation; the original draft's `SET LOCAL ... = :tid` sample does
 not run).
 
-`SET LOCAL` scopes the variable to the current transaction, so it cannot
-leak across pooled connections between requests. Every repository method
-runs inside a session opened this way; there is no code path that opens a
-session without a `tenant_id`. The future auth plan's only change here is
+`SET LOCAL` scopes the variable to the current *transaction*, so its value
+reverts at commit — but, per the amendment above, it reverts to `''` rather
+than to unset, and the underlying physical connection can therefore still
+carry that stale empty string into its next reuse from the pool. That is
+precisely why the policy wraps the lookup in `nullif(..., '')`: transaction
+scoping alone does not make the GUC safe across pooled connections.
+
+Because the value is transaction-scoped, it must also be re-applied for
+*every* transaction a session opens, not just the first — a caller that
+commits mid-block would otherwise silently continue with no tenant context.
+`tenant_scoped_session` therefore registers the `set_config` call as an
+`after_begin` session event rather than executing it once at session open
+(found during the final review; `test_session.py` has a regression test for
+the mid-block-commit case).
+
+Every repository method runs inside a session opened this way; there is no
+code path that opens a session without a `tenant_id`. The future auth plan's only change here is
 *where* `tenant_id` comes from (JWT claim, re-validated per ADR-0021)
 rather than a test/caller-supplied value — the session and repository
 code do not change.
@@ -311,9 +329,20 @@ class TokenVault:
   scheduler yet — that's the retention plan's job. Deleting a tenant's DEK
   entirely (crypto-shredding) is a `TenantRepository` operation, not a
   vault operation, and is likewise not scheduled here.
-- `privacy_gateway/` still imports nothing network-capable (ADR-0001) —
-  `cryptography` and the DB driver are the only new dependencies, both
-  local/non-network.
+- The import-linter contract on `privacy_gateway/` still holds (ADR-0001).
+  Stated precisely: it blocks imports of the external-service client
+  libraries ADR-0001 is actually concerned with — `httpx`, `requests` and
+  friends, i.e. the LLM/API *egress* paths by which raw values could leave
+  the boundary. It does **not** prove that `privacy_gateway/` performs zero
+  network I/O in an absolute sense, and cannot: it is a static
+  import-graph check and does not traverse into what a dependency does
+  internally. `psycopg` is in fact a TCP client — it opens real network
+  connections to Postgres. That is an intentional, accepted exception
+  (the vault has to reach its own database to store and retrieve token
+  mappings), not something the contract permits by oversight. Of this
+  plan's two new dependencies, `cryptography` is genuinely local, and the
+  DB driver's connection is in-scope-by-design traffic to a first-party
+  datastore rather than egress to a third-party service.
 
 ## 7. Testing Strategy
 
@@ -348,11 +377,21 @@ class TokenVault:
 
 ## 8. Assumptions Requiring Validation
 
-- `SET LOCAL` reliably resets between pooled connection reuses under
+- ~~`SET LOCAL` reliably resets between pooled connection reuses under
   SQLAlchemy's default `Session`/connection-pool behavior — needs a
   targeted test (covered by the "no session var set" negative test
   above, run repeatedly across pooled connections) rather than taken on
-  faith.
+  faith.~~ — **the test now exists, and the assumption was partly
+  disproven (Task 5):** the GUC does *not* reset to unset between reuses
+  of a pooled connection; it reverts to the empty string `''`, which then
+  raises `invalid input syntax for type uuid` on the cast rather than
+  yielding `NULL`. §4 documents the `nullif(..., '')` wrapper added to
+  every policy to restore the intended fail-closed behavior, and
+  `test_app_runtime_role.py` carries a pooled-connection regression test
+  that reproduces the original failure. A related consequence found during
+  the final review: because the value is transaction-scoped, it must be
+  re-applied on every transaction the session opens, which is why
+  `tenant_scoped_session` now uses an `after_begin` event listener (§4).
 - ~~A single Postgres role for the app (no separate migration-only
   superuser role) is acceptable for MVP; `FORCE ROW LEVEL SECURITY`
   is the chosen mitigation for that specific risk rather than a
