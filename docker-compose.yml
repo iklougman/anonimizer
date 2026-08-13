@@ -36,6 +36,11 @@ services:
     environment:
       ENVIRONMENT: ${ENVIRONMENT}
       LOG_LEVEL: ${LOG_LEVEL}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      MASTER_KEY_PATH: /run/secrets/master_key
+      APP_RUNTIME_PASSWORD: ${APP_RUNTIME_PASSWORD}
+    secrets:
+      - master_key
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:
@@ -52,3 +57,7 @@ services:
 volumes:
   postgres_data:
   ollama_data:
+
+secrets:
+  master_key:
+    file: ./secrets/master.key

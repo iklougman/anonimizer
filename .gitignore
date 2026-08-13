@@ -18,6 +18,7 @@ next-env.d.ts
 # Env / local overrides
 .env
 docker-compose.override.yml
+secrets/
 
 # OS
 .DS_Store
