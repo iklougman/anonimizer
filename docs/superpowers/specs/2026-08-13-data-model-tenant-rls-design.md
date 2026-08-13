@@ -145,17 +145,32 @@ For every tenant-scoped table **except `tenants` itself**
 ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
 ALTER TABLE <table> FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON <table>
-  USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
-  WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
+  USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+  WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid);
 ```
 
 The `current_setting(..., true)` second argument (`missing_ok`) matters:
 without it, a session that never set the variable raises a hard Postgres
 error rather than matching zero rows, which breaks the "forgot to open a
 tenant-scoped session" case's fail-**closed** contract — `missing_ok=true`
-makes `current_setting` return `NULL` instead, so the comparison
-evaluates to unknown/false and the query returns zero rows instead of
-raising (found during implementation; the original draft omitted this).
+makes `current_setting` return `NULL` when the GUC was *never* set on
+that connection, so the comparison evaluates to unknown/false and the
+query returns zero rows instead of raising (found during Task 4b).
+
+**`missing_ok=true` alone is not sufficient once connections are pooled.**
+Found during Task 5: after `set_config('app.current_tenant_id', ...,
+true)` (`SET LOCAL` semantics) has been called at least once on a given
+physical connection and that transaction commits, Postgres does not
+revert the custom GUC to *unset* — it reverts to the empty string `''`.
+A connection pool (SQLAlchemy's default `SessionLocal` included) reuses
+that same physical connection for later requests, so a later session that
+never opened a tenant-scoped context can still observe `''` left over
+from a previous tenant's request on the same pooled connection, and
+`''::uuid` raises `invalid input syntax for type uuid`, not `NULL`. The
+`nullif(..., '')` wrapper converts that leftover empty string to `NULL`
+before the cast, restoring the intended "no context = zero rows, never an
+error" behavior regardless of what a previous request on the same pooled
+connection left behind.
 
 **`FORCE ROW LEVEL SECURITY` only matters if the connecting role is not a
 superuser.** This was wrong in the original draft of this section, which

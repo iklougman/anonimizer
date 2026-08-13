@@ -52,10 +52,14 @@ can't be tested without real Postgres).
 - Every tenant-scoped table (every table except `tenants`) gets
   `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, `... FORCE ROW LEVEL
   SECURITY`, and a policy `USING (tenant_id =
-  current_setting('app.current_tenant_id', true)::uuid)` — the
-  `missing_ok=true` second argument to `current_setting` is required so a
-  session with no tenant context set fails closed (zero rows) rather than
-  raising a Postgres error.
+  nullif(current_setting('app.current_tenant_id', true), '')::uuid)` —
+  `missing_ok=true` alone only covers a connection that never set the GUC;
+  `nullif(..., '')` is also required because Postgres reverts a
+  session-local GUC to `''` (not unset) after it's been used once on a
+  pooled connection, and `''::uuid` raises rather than filtering to zero
+  rows. Both a session with no tenant context and a pooled connection
+  carrying a stale empty GUC from an earlier request must fail closed the
+  same way.
 - Every repository method's first parameter is `tenant_id`, and every
   query includes it explicitly — redundant with RLS by design (ADR-0011:
   "neither layer alone is trusted as sufficient").
@@ -1495,8 +1499,8 @@ def upgrade() -> None:
         op.execute(
             f"""
             CREATE POLICY tenant_isolation ON {table}
-            USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
-            WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+            USING (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
+            WITH CHECK (tenant_id = nullif(current_setting('app.current_tenant_id', true), '')::uuid)
             """
         )
 
@@ -1524,6 +1528,19 @@ creation is idempotent (`IF NOT EXISTS` / `ALTER ROLE ... WITH PASSWORD`
 on the else branch) so re-running `alembic upgrade head` against a
 database that already has the role just refreshes its password rather
 than erroring.
+
+**`nullif(..., '')` matters, not just `missing_ok=true`, once connections
+are pooled** (found by Task 5's implementer): after `set_config(...,
+true)` has been called once on a physical connection and committed,
+Postgres reverts that GUC to the empty string `''` for the rest of that
+connection's life — not to unset/`NULL`. A pooled `SessionLocal` reuses
+physical connections across requests, so a later request that opens no
+tenant context can still inherit `''` from an earlier request on the same
+connection, and `''::uuid` raises rather than filtering to zero rows.
+`nullif(current_setting(...), '')` converts that leftover `''` to `NULL`
+before the cast, so "no context" is zero rows on every request,
+regardless of pooled connection history — this is a correction to what
+this task originally shipped, not a new requirement.
 
 - [ ] **Step 10: Apply the migration**
 
