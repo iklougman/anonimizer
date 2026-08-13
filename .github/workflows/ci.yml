@@ -11,14 +11,35 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: chatgpt_proxy
+          POSTGRES_PASSWORD: change-me
+          POSTGRES_DB: chatgpt_proxy
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U chatgpt_proxy"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql+psycopg://chatgpt_proxy:change-me@localhost:5432/chatgpt_proxy
+      MASTER_KEY_PATH: /tmp/ci-master.key
+      APP_RUNTIME_PASSWORD: change-me-app-runtime
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      - run: head -c 32 /dev/urandom > /tmp/ci-master.key
       - run: ruff check .
       - run: lint-imports
+      - run: alembic upgrade head
       - run: pytest --cov=app
 
   frontend:
