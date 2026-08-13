@@ -1,6 +1,9 @@
 # Data Model & Tenant RLS — Design
 
-**Status:** Draft — pending review
+**Status:** Approved, amended during implementation — see §2, §4, §8
+(Task 5 discovered the app's Postgres role is a superuser, which makes
+`FORCE ROW LEVEL SECURITY` a no-op; fixed with a second, restricted
+`app_runtime` role).
 
 **Depends on:** `docs/superpowers/specs/2026-08-11-privacy-gateway-mvp-design.md`
 §4 (data model), ADR-0008 (isolated token vault), ADR-0009 (token scope),
@@ -55,10 +58,20 @@ design-doc §9.
   Postgres extension.
 - **Settings additions** (`app/config.py`, extending Task 2's `Settings`):
   - `database_url: str` — required, no default (fail-closed: missing DB
-    config crashes startup, per ADR-0020).
+    config crashes startup, per ADR-0020). This is the **admin/migration**
+    connection — Alembic runs as this role. It is *not* what the running
+    application uses for ordinary queries (see `app_database_url` below
+    and §4).
   - `master_key_path: str` — required, no default. Path to a mounted
     secret file (Docker secret / bind-mounted file) holding the master key
     that wraps every tenant's DEK (ADR-0010). Never a literal key in env.
+  - `app_runtime_password: str` — required, no default. Password for the
+    restricted `app_runtime` Postgres role (§4) that the application
+    connects as at runtime. A derived `app_database_url` property builds
+    the full connection string from `database_url`'s host/port/database
+    with this role's credentials substituted in, so host/port/database
+    are never duplicated or allowed to drift between the two connection
+    strings.
 
 ## 3. Data Model
 
@@ -132,26 +145,56 @@ For every tenant-scoped table **except `tenants` itself**
 ALTER TABLE <table> ENABLE ROW LEVEL SECURITY;
 ALTER TABLE <table> FORCE ROW LEVEL SECURITY;
 CREATE POLICY tenant_isolation ON <table>
-  USING (tenant_id = current_setting('app.current_tenant_id')::uuid)
-  WITH CHECK (tenant_id = current_setting('app.current_tenant_id')::uuid);
+  USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+  WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid);
 ```
 
-`FORCE ROW LEVEL SECURITY` is what makes this a real backstop rather than
-a no-op: without it, the role that owns the tables (the app's own DB user
-in a single-role MVP setup) bypasses RLS by default, which would silently
-defeat ADR-0011's "layer 2 catches a layer-1 bug" guarantee for the most
-likely real-world case — the application's own connection.
+The `current_setting(..., true)` second argument (`missing_ok`) matters:
+without it, a session that never set the variable raises a hard Postgres
+error rather than matching zero rows, which breaks the "forgot to open a
+tenant-scoped session" case's fail-**closed** contract — `missing_ok=true`
+makes `current_setting` return `NULL` instead, so the comparison
+evaluates to unknown/false and the query returns zero rows instead of
+raising (found during implementation; the original draft omitted this).
 
-`current_setting('app.current_tenant_id')` is a session-local Postgres
-variable, set per logical unit of work by:
+**`FORCE ROW LEVEL SECURITY` only matters if the connecting role is not a
+superuser.** This was wrong in the original draft of this section, which
+assumed the app's DB role was merely the *table owner* — `FORCE` does
+neutralize an owning role's default RLS bypass, but it can never apply to
+a Postgres **superuser**, and the official Postgres Docker image's
+`POSTGRES_USER` (the credential the app was going to connect as) is
+created as a superuser. A superuser connection makes every RLS policy on
+every table inert, `FORCE` or not — verified during implementation (Task
+5) by confirming the app's runtime role had `rolsuper = true`.
+
+The fix: the application connects at runtime as a **second, restricted
+role** — `app_runtime`, created `NOSUPERUSER NOBYPASSRLS` with explicit
+`SELECT`/`INSERT`/`UPDATE`/`DELETE` grants on exactly the 8 tables, never
+`CREATEROLE`/`CREATEDB`. Migrations continue to run as the original
+admin/superuser role (`database_url`) — provisioning `app_runtime` itself
+requires superuser privileges, so that part legitimately runs as the
+admin role. Only the *application's* ordinary query traffic — every
+repository, the Token Vault — connects as `app_runtime`, via a new
+`app_database_url` setting (§2). This is the two-role split ADR-0011
+already implied ("a bug in layer 1 is caught by layer 2") but the
+original draft failed to make load-bearing: layer 2 cannot catch anything
+for a connection that Postgres itself exempts from every check.
+
+`current_setting('app.current_tenant_id', true)` is a session-local
+Postgres variable, set per logical unit of work by:
 
 ```python
 # backend/app/db/session.py
+engine = create_engine(get_settings().app_database_url)  # app_runtime, not database_url
+SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
+
 @contextmanager
 def tenant_scoped_session(tenant_id: uuid.UUID) -> Iterator[Session]:
     with SessionLocal() as session:
-        session.execute(text("SET LOCAL app.current_tenant_id = :tid"),
-                         {"tid": str(tenant_id)})
+        session.execute(
+            text("SELECT set_config('app.current_tenant_id', :tid, true)"),
+            {"tid": str(tenant_id)},
+        )
         try:
             yield session
             session.commit()
@@ -159,6 +202,14 @@ def tenant_scoped_session(tenant_id: uuid.UUID) -> Iterator[Session]:
             session.rollback()
             raise
 ```
+
+`set_config(..., true)` (the `is_local` third argument) is the
+parameter-bindable equivalent of `SET LOCAL` — Postgres does not accept
+bind parameters in `SET`/`SET LOCAL` statements directly (`SET LOCAL x =
+$1` is a syntax error), so `set_config()` is the standard safe substitute
+and has identical transaction-scoping semantics (found during
+implementation; the original draft's `SET LOCAL ... = :tid` sample does
+not run).
 
 `SET LOCAL` scopes the variable to the current transaction, so it cannot
 leak across pooled connections between requests. Every repository method
@@ -287,8 +338,17 @@ class TokenVault:
   targeted test (covered by the "no session var set" negative test
   above, run repeatedly across pooled connections) rather than taken on
   faith.
-- A single Postgres role for the app (no separate migration-only
+- ~~A single Postgres role for the app (no separate migration-only
   superuser role) is acceptable for MVP; `FORCE ROW LEVEL SECURITY`
   is the chosen mitigation for that specific risk rather than a
-  privilege-separated role, consistent with ADR-0011's stated MVP
-  scope (single Postgres + RLS, not per-tenant databases).
+  privilege-separated role~~ — **disproven during implementation (Task
+  5):** the app's role (`POSTGRES_USER`, per the official Postgres Docker
+  image) is a superuser, and `FORCE ROW LEVEL SECURITY` has no effect on
+  superusers at all — this is documented Postgres behavior, not
+  configurable. A single role is *not* sufficient; §4 now specifies a
+  second, restricted `app_runtime` role for the application's own
+  connections, with the original role retained only for migrations. This
+  is still "single Postgres + RLS, not per-tenant databases" per
+  ADR-0011's stated MVP scope — the two-role split is a same-database
+  privilege separation, not the per-tenant-database alternative ADR-0011
+  rejected.

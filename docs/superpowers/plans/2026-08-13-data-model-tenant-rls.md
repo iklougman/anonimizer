@@ -34,16 +34,28 @@ can't be tested without real Postgres).
   `alembic>=1.13,<2`, `cryptography>=43,<44`.
 - Primary keys are application-generated `uuid.uuid4()`, Python-side
   default.
-- `Settings.database_url: str` and `Settings.master_key_path: str` are
-  both required with no default — missing config crashes startup
-  (fail-closed, ADR-0020), matching the existing `environment` field's
-  pattern.
+- `Settings.database_url: str`, `Settings.master_key_path: str`, and
+  `Settings.app_runtime_password: str` are all required with no default —
+  missing config crashes startup (fail-closed, ADR-0020), matching the
+  existing `environment` field's pattern.
+- **Two Postgres roles, not one** (added as Task 4b after Task 5 found
+  the original single-role design didn't work — see the amended design
+  spec §4, §8): `database_url` connects as the admin/superuser role and
+  is used **only** for running migrations. The application itself —
+  every repository, the Token Vault, `app/db/session.py` — connects as a
+  separate restricted `app_runtime` role (`NOSUPERUSER NOBYPASSRLS`, DML
+  grants only) via `Settings.app_database_url`, a property derived from
+  `database_url` with the role swapped in. `FORCE ROW LEVEL SECURITY` on
+  its own does nothing for a superuser connection — Postgres exempts
+  superusers from RLS unconditionally, `FORCE` or not — so the restricted
+  role is what makes `FORCE` (below) meaningful at all.
 - Every tenant-scoped table (every table except `tenants`) gets
   `ALTER TABLE ... ENABLE ROW LEVEL SECURITY`, `... FORCE ROW LEVEL
   SECURITY`, and a policy `USING (tenant_id =
-  current_setting('app.current_tenant_id')::uuid)` — `FORCE` is required,
-  not optional, or the app's own DB role bypasses RLS by default
-  (ADR-0011).
+  current_setting('app.current_tenant_id', true)::uuid)` — the
+  `missing_ok=true` second argument to `current_setting` is required so a
+  session with no tenant context set fails closed (zero rows) rather than
+  raising a Postgres error.
 - Every repository method's first parameter is `tenant_id`, and every
   query includes it explicitly — redundant with RLS by design (ADR-0011:
   "neither layer alone is trusted as sufficient").
@@ -1106,6 +1118,447 @@ git commit -m "feat: enable and force RLS on every tenant-scoped table"
 
 ---
 
+## Task 4b: Restricted `app_runtime` Postgres role (fixes RLS bypass)
+
+> **Why this task exists:** it was not in the original plan. Task 5's
+> implementer found that RLS (Task 4) has no effect at all — the app's DB
+> role (`chatgpt_proxy`, from `POSTGRES_USER`, per the official Postgres
+> Docker image) is a **superuser**, and Postgres unconditionally exempts
+> superusers from Row-Level Security; `FORCE ROW LEVEL SECURITY` cannot
+> change that. See the amended design spec §4/§8 for the full writeup.
+> This task provisions a second, restricted role for the application's
+> own connections and fixes a related fail-closed gap in the RLS policy
+> (missing `missing_ok=true` on `current_setting`). Task 5 is re-briefed
+> below to consume this task's `app_database_url` instead of
+> `database_url`.
+
+**Files:**
+- Modify: `backend/app/config.py`
+- Modify: `backend/tests/unit/test_config.py`
+- Modify: `backend/tests/conftest.py`
+- Create: `backend/alembic/versions/0003_app_runtime_role.py`
+- Test: `backend/tests/privacy_invariants/test_app_runtime_role.py`
+
+**Interfaces:**
+- Consumes: `Settings.database_url` (Task 1), `db_engine` fixture (Task
+  4), `Tenant`/`User` models (Task 2).
+- Produces: `Settings.app_runtime_password: str` (required, no default)
+  and `Settings.app_database_url` (a property — not a settings field —
+  derived from `database_url` with the role and password swapped to
+  `app_runtime`/`app_runtime_password`), and a Postgres role `app_runtime`
+  (`NOSUPERUSER NOBYPASSRLS`, `SELECT`/`INSERT`/`UPDATE`/`DELETE` on all 8
+  tables). Task 5's `app/db/session.py` connects as this role via
+  `get_settings().app_database_url`.
+
+- [ ] **Step 1: Write the failing tests for the new setting**
+
+Replace `backend/tests/unit/test_config.py` in full with:
+
+```python
+import pytest
+from pydantic import ValidationError
+
+from app.config import Settings
+
+
+def test_settings_requires_environment_explicitly(monkeypatch):
+    monkeypatch.delenv("ENVIRONMENT", raising=False)
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
+    monkeypatch.setenv("MASTER_KEY_PATH", "/run/secrets/master_key")
+    monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_settings_requires_database_url_explicitly(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("MASTER_KEY_PATH", "/run/secrets/master_key")
+    monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_settings_requires_master_key_path_explicitly(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
+    monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
+    monkeypatch.delenv("MASTER_KEY_PATH", raising=False)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_settings_requires_app_runtime_password_explicitly(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
+    monkeypatch.setenv("MASTER_KEY_PATH", "/run/secrets/master_key")
+    monkeypatch.delenv("APP_RUNTIME_PASSWORD", raising=False)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_settings_defaults_are_secure(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
+    monkeypatch.setenv("MASTER_KEY_PATH", "/run/secrets/master_key")
+    monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
+    settings = Settings(_env_file=None)
+    assert settings.debug is False
+    assert settings.cors_allowed_origins == []
+
+
+def test_settings_rejects_unknown_environment(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "staging")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
+    monkeypatch.setenv("MASTER_KEY_PATH", "/run/secrets/master_key")
+    monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_settings_ignores_unrelated_env_vars(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
+    monkeypatch.setenv("MASTER_KEY_PATH", "/run/secrets/master_key")
+    monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
+    monkeypatch.setenv("POSTGRES_USER", "chatgpt_proxy")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "change-me")
+    monkeypatch.setenv("POSTGRES_DB", "chatgpt_proxy")
+    monkeypatch.setenv("KEYCLOAK_ADMIN", "admin")
+    monkeypatch.setenv("KEYCLOAK_ADMIN_PASSWORD", "change-me")
+    settings = Settings(_env_file=None)
+    assert settings.environment == "development"
+
+
+def test_app_database_url_derives_from_database_url_with_app_runtime_credentials(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://admin_user:admin_pw@dbhost:5432/mydb")
+    monkeypatch.setenv("MASTER_KEY_PATH", "/run/secrets/master_key")
+    monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
+    settings = Settings(_env_file=None)
+    assert settings.app_database_url == "postgresql+psycopg://app_runtime:runtime-secret@dbhost:5432/mydb"
+```
+
+- [ ] **Step 2: Run the tests to verify the new ones fail**
+
+Run: `cd backend && pytest tests/unit/test_config.py -v`
+Expected: FAIL — `test_settings_requires_app_runtime_password_explicitly`
+(no such field yet, so nothing raises) and
+`test_app_database_url_derives_from_database_url_with_app_runtime_credentials`
+(`AttributeError: 'Settings' object has no attribute 'app_database_url'`)
+fail; the rest pass unchanged.
+
+- [ ] **Step 3: Add the field and derived property to `backend/app/config.py`**
+
+Replace the file in full with:
+
+```python
+from functools import lru_cache
+from typing import Literal
+
+from pydantic import Field
+from pydantic_settings import BaseSettings
+from sqlalchemy.engine import make_url
+
+
+class Settings(BaseSettings):
+    environment: Literal["development", "test", "production"]
+    log_level: str = "INFO"
+    debug: bool = False
+    cors_allowed_origins: list[str] = Field(default_factory=list)
+    database_url: str
+    master_key_path: str
+    app_runtime_password: str
+
+    @property
+    def app_database_url(self) -> str:
+        url = make_url(self.database_url).set(
+            username="app_runtime", password=self.app_runtime_password
+        )
+        return url.render_as_string(hide_password=False)
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
+```
+
+`render_as_string(hide_password=False)` is required — plain `str(url)`
+masks the password as `***` (SQLAlchemy's default safe-printing
+behavior), which would silently produce an unusable connection string.
+
+- [ ] **Step 4: Run the tests to verify they all pass**
+
+Run: `cd backend && pytest tests/unit/test_config.py -v`
+Expected: PASS (8 passed).
+
+- [ ] **Step 5: Update `backend/tests/conftest.py` so the rest of the suite has a valid `app_runtime_password`**
+
+Add this line after the existing `DATABASE_URL` `setdefault` call:
+
+```python
+os.environ.setdefault("APP_RUNTIME_PASSWORD", "change-me-app-runtime")
+```
+
+The full file is now:
+
+```python
+import os
+import tempfile
+
+import pytest
+import sqlalchemy as sa
+
+os.environ["ENVIRONMENT"] = "test"
+os.environ.setdefault(
+    "DATABASE_URL",
+    "postgresql+psycopg://chatgpt_proxy:change-me@localhost:5432/chatgpt_proxy",
+)
+os.environ.setdefault("APP_RUNTIME_PASSWORD", "change-me-app-runtime")
+
+_master_key_file = tempfile.NamedTemporaryFile(delete=False)
+_master_key_file.write(os.urandom(32))
+_master_key_file.close()
+os.environ.setdefault("MASTER_KEY_PATH", _master_key_file.name)
+
+from app.config import get_settings  # noqa: E402
+
+
+@pytest.fixture(autouse=True)
+def _clear_settings_cache():
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(scope="session")
+def db_engine():
+    engine = sa.create_engine(get_settings().database_url)
+    yield engine
+    engine.dispose()
+```
+
+- [ ] **Step 6: Run the full backend test suite to confirm nothing else broke**
+
+Run: `cd backend && pytest -v`
+Expected: all tests pass (this uses the default `change-me-app-runtime`
+password everywhere except the two tests above, which set their own
+value via `monkeypatch`).
+
+- [ ] **Step 7: Write the failing test for the role and the RLS fail-closed fix**
+
+`backend/tests/privacy_invariants/test_app_runtime_role.py`:
+
+```python
+import uuid
+
+import sqlalchemy as sa
+
+from app.config import get_settings
+from app.models import Tenant, User
+
+
+def _create_tenant_and_user(db_engine) -> uuid.UUID:
+    tenant_id = uuid.uuid4()
+    with db_engine.begin() as conn:
+        conn.execute(
+            sa.insert(Tenant).values(
+                id=tenant_id,
+                name="Clinic",
+                keycloak_realm=f"realm-{tenant_id}",
+                retention_days=30,
+            )
+        )
+        conn.execute(
+            sa.insert(User).values(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                keycloak_subject="sub",
+                email="doc@example.com",
+                role="doctor",
+            )
+        )
+    return tenant_id
+
+
+def test_app_runtime_role_is_not_superuser_and_cannot_bypass_rls(db_engine):
+    with db_engine.connect() as conn:
+        row = conn.execute(
+            sa.text("SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = 'app_runtime'")
+        ).one()
+        assert row.rolsuper is False
+        assert row.rolbypassrls is False
+
+
+def test_app_runtime_query_with_no_tenant_context_returns_zero_rows_not_an_error(db_engine):
+    tenant_id = _create_tenant_and_user(db_engine)
+    app_engine = sa.create_engine(get_settings().app_database_url)
+    try:
+        with app_engine.connect() as conn:
+            rows = conn.execute(sa.select(User).where(User.tenant_id == tenant_id)).fetchall()
+            assert rows == []
+    finally:
+        app_engine.dispose()
+
+
+def test_app_runtime_query_with_correct_tenant_context_returns_the_row(db_engine):
+    tenant_id = _create_tenant_and_user(db_engine)
+    app_engine = sa.create_engine(get_settings().app_database_url)
+    try:
+        with app_engine.connect() as conn:
+            conn.execute(
+                sa.text("SELECT set_config('app.current_tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            rows = conn.execute(sa.select(User).where(User.tenant_id == tenant_id)).fetchall()
+            assert len(rows) == 1
+    finally:
+        app_engine.dispose()
+```
+
+- [ ] **Step 8: Run the test to verify it fails**
+
+Run: `cd backend && pytest tests/privacy_invariants/test_app_runtime_role.py -v`
+Expected: FAIL —
+`test_app_runtime_role_is_not_superuser_and_cannot_bypass_rls` fails with
+`sqlalchemy.exc.NoResultFound` (the `app_runtime` role doesn't exist
+yet); the other two fail with an authentication error (no such role to
+connect as).
+
+- [ ] **Step 9: Create `backend/alembic/versions/0003_app_runtime_role.py`**
+
+```python
+"""provision restricted app_runtime role; fix RLS policy to fail closed on missing context
+
+Revision ID: 0003
+Revises: 0002
+Create Date: 2026-08-13
+
+"""
+from typing import Sequence, Union
+
+from alembic import op
+
+from app.config import get_settings
+
+revision: str = "0003"
+down_revision: Union[str, None] = "0002"
+branch_labels: Union[str, Sequence[str], None] = None
+depends_on: Union[str, Sequence[str], None] = None
+
+ALL_TABLES = [
+    "tenants",
+    "users",
+    "conversations",
+    "messages",
+    "tenant_keys",
+    "token_mappings",
+    "audit_events",
+    "llm_requests",
+]
+
+TENANT_SCOPED_TABLES = [
+    "users",
+    "conversations",
+    "messages",
+    "tenant_keys",
+    "token_mappings",
+    "audit_events",
+    "llm_requests",
+]
+
+
+def upgrade() -> None:
+    escaped_password = get_settings().app_runtime_password.replace("'", "''")
+
+    op.execute(
+        f"""
+        DO $$
+        BEGIN
+            IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'app_runtime') THEN
+                CREATE ROLE app_runtime LOGIN PASSWORD '{escaped_password}'
+                    NOSUPERUSER NOBYPASSRLS NOCREATEDB NOCREATEROLE;
+            ELSE
+                ALTER ROLE app_runtime WITH PASSWORD '{escaped_password}';
+            END IF;
+        END
+        $$;
+        """
+    )
+
+    op.execute("GRANT USAGE ON SCHEMA public TO app_runtime")
+    for table in ALL_TABLES:
+        op.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO app_runtime")
+
+    for table in TENANT_SCOPED_TABLES:
+        op.execute(f"DROP POLICY tenant_isolation ON {table}")
+        op.execute(
+            f"""
+            CREATE POLICY tenant_isolation ON {table}
+            USING (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+            WITH CHECK (tenant_id = current_setting('app.current_tenant_id', true)::uuid)
+            """
+        )
+
+
+def downgrade() -> None:
+    for table in TENANT_SCOPED_TABLES:
+        op.execute(f"DROP POLICY tenant_isolation ON {table}")
+        op.execute(
+            f"""
+            CREATE POLICY tenant_isolation ON {table}
+            USING (tenant_id = current_setting('app.current_tenant_id')::uuid)
+            WITH CHECK (tenant_id = current_setting('app.current_tenant_id')::uuid)
+            """
+        )
+
+    op.execute("REVOKE ALL PRIVILEGES ON ALL TABLES IN SCHEMA public FROM app_runtime")
+    op.execute("REVOKE USAGE ON SCHEMA public FROM app_runtime")
+    op.execute("DROP ROLE IF EXISTS app_runtime")
+```
+
+`upgrade()` reads the password via `get_settings().app_runtime_password`
+rather than a new raw env-var read, so there is exactly one place
+(`Settings`) that knows how the app's credentials are assembled. The role
+creation is idempotent (`IF NOT EXISTS` / `ALTER ROLE ... WITH PASSWORD`
+on the else branch) so re-running `alembic upgrade head` against a
+database that already has the role just refreshes its password rather
+than erroring.
+
+- [ ] **Step 10: Apply the migration**
+
+Run:
+```bash
+cd backend
+export ENVIRONMENT=development
+export DATABASE_URL=postgresql+psycopg://chatgpt_proxy:change-me@localhost:5432/chatgpt_proxy
+export MASTER_KEY_PATH=/tmp/dev-master.key
+export APP_RUNTIME_PASSWORD=change-me-app-runtime
+alembic upgrade head
+```
+Expected: `Running upgrade 0002 -> 0003, provision restricted app_runtime role...`
+
+- [ ] **Step 11: Run the test to verify it passes**
+
+Run: `cd backend && pytest tests/privacy_invariants/test_app_runtime_role.py -v`
+Expected: PASS (3 passed).
+
+- [ ] **Step 12: Run the full backend test suite**
+
+Run: `cd backend && pytest -v`
+Expected: all tests pass (the pre-existing RLS tests from Task 4 only
+check `pg_class`/`pg_policies` state, which migration 0003 doesn't
+change — same policies exist, just with `missing_ok=true` added).
+
+- [ ] **Step 13: Commit**
+
+```bash
+git add backend/app/config.py backend/tests/unit/test_config.py backend/tests/conftest.py backend/alembic/versions/0003_app_runtime_role.py backend/tests/privacy_invariants/test_app_runtime_role.py
+git commit -m "fix: provision restricted app_runtime role so FORCE ROW LEVEL SECURITY actually applies"
+```
+
+---
+
 ## Task 5: Tenant-scoped session helper
 
 **Files:**
@@ -1113,8 +1566,10 @@ git commit -m "feat: enable and force RLS on every tenant-scoped table"
 - Test: `backend/tests/integration/test_session.py`
 
 **Interfaces:**
-- Consumes: `get_settings().database_url` (Task 1), ORM models `Tenant`,
-  `User` (Task 2), applied migrations (Tasks 3–4).
+- Consumes: `get_settings().app_database_url` (Task 4b — the restricted
+  `app_runtime` role; **not** `database_url`, which is the admin/migration
+  connection and must never be used for the application's own queries),
+  ORM models `Tenant`, `User` (Task 2), applied migrations (Tasks 3–4b).
 - Produces: `engine` (`sqlalchemy.Engine`), `SessionLocal`
   (`sessionmaker`), and `tenant_scoped_session(tenant_id: uuid.UUID) ->
   ContextManager[Session]` from `app.db.session`. Every repository and
@@ -1210,14 +1665,17 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.config import get_settings
 
-engine = create_engine(get_settings().database_url)
+engine = create_engine(get_settings().app_database_url)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 
 @contextmanager
 def tenant_scoped_session(tenant_id: uuid.UUID) -> Iterator[Session]:
     with SessionLocal() as session:
-        session.execute(text("SET LOCAL app.current_tenant_id = :tid"), {"tid": str(tenant_id)})
+        session.execute(
+            text("SELECT set_config('app.current_tenant_id', :tid, true)"),
+            {"tid": str(tenant_id)},
+        )
         try:
             yield session
             session.commit()
@@ -1225,6 +1683,15 @@ def tenant_scoped_session(tenant_id: uuid.UUID) -> Iterator[Session]:
             session.rollback()
             raise
 ```
+
+Note: `engine` binds to `app_database_url` (the restricted `app_runtime`
+role from Task 4b), not `database_url` (the admin/migration role) — this
+is what makes `FORCE ROW LEVEL SECURITY` actually apply. `set_config(...,
+true)` is the parameter-bindable equivalent of `SET LOCAL` — Postgres
+does not accept bind parameters in a literal `SET LOCAL x = $1`
+statement (it raises a syntax error), so this is the standard safe
+substitute with identical transaction-scoping semantics (`is_local =
+true`).
 
 - [ ] **Step 4: Run the test to verify it passes**
 
@@ -2024,6 +2491,7 @@ Replace the `backend` job with:
       ENVIRONMENT: test
       DATABASE_URL: postgresql+psycopg://chatgpt_proxy:change-me@localhost:5432/chatgpt_proxy
       MASTER_KEY_PATH: /tmp/ci-master.key
+      APP_RUNTIME_PASSWORD: change-me-app-runtime
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -2047,6 +2515,7 @@ cd backend
 export ENVIRONMENT=test
 export DATABASE_URL=postgresql+psycopg://chatgpt_proxy:change-me@localhost:5432/chatgpt_proxy
 export MASTER_KEY_PATH=/tmp/ci-master.key
+export APP_RUNTIME_PASSWORD=change-me-app-runtime
 head -c 32 /dev/urandom > /tmp/ci-master.key
 ruff check .
 lint-imports
@@ -2074,11 +2543,12 @@ git commit -m "ci: run backend tests against a real Postgres service container"
 - Modify: `backend/Dockerfile`
 - Modify: `.gitignore`
 - Modify: `README.md`
+- Modify: `.env.example`
 
 **Interfaces:**
 - Consumes: everything from Tasks 1–9 (the backend container must be able
   to run `alembic upgrade head` and start with valid `DATABASE_URL`/
-  `MASTER_KEY_PATH`).
+  `MASTER_KEY_PATH`/`APP_RUNTIME_PASSWORD`).
 - Produces: a `docker compose up --build` stack where the backend
   container migrates itself on startup and both health checks still pass
   — the same verification done manually for the scaffold plan, now with
@@ -2139,6 +2609,7 @@ services:
       LOG_LEVEL: ${LOG_LEVEL}
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MASTER_KEY_PATH: /run/secrets/master_key
+      APP_RUNTIME_PASSWORD: ${APP_RUNTIME_PASSWORD}
     secrets:
       - master_key
     ports:
@@ -2204,7 +2675,18 @@ EXPOSE 8000
 CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
 ```
 
-- [ ] **Step 5: Update `README.md`**
+- [ ] **Step 5: Add `APP_RUNTIME_PASSWORD` to `.env.example`**
+
+Add this line under the `# --- Postgres ---` section (after
+`POSTGRES_DB=chatgpt_proxy`):
+
+```
+# Password for the restricted app_runtime Postgres role (not the admin
+# POSTGRES_USER/PASSWORD above, which is only used for migrations).
+APP_RUNTIME_PASSWORD=change-me-app-runtime
+```
+
+- [ ] **Step 6: Update `README.md`**
 
 Replace the `## Local development` and `## Backend tests` sections with:
 
@@ -2229,6 +2711,7 @@ cd backend
 pip install -e ".[dev]"
 export DATABASE_URL=postgresql+psycopg://chatgpt_proxy:change-me@localhost:5432/chatgpt_proxy
 export MASTER_KEY_PATH=../secrets/master.key
+export APP_RUNTIME_PASSWORD=change-me-app-runtime
 alembic upgrade head
 pytest
 ruff check .
@@ -2236,7 +2719,7 @@ lint-imports
 ```
 ```
 
-- [ ] **Step 6: Generate a local master key and verify the full stack still boots**
+- [ ] **Step 7: Generate a local master key and verify the full stack still boots**
 
 Run:
 ```bash
@@ -2247,15 +2730,15 @@ docker compose logs backend | grep -i alembic
 curl -sf http://localhost:8000/health
 curl -sf http://localhost:3000/api/healthz
 ```
-Expected: backend logs show `Running upgrade ... -> 0002`; both curls
+Expected: backend logs show `Running upgrade ... -> 0003`; both curls
 print `{"status":"ok"}`. (Skip the `ollama` service in this command if a
 native Ollama is already running on the host and holding port 11434.)
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 8: Commit**
 
 ```bash
-git add docker-compose.yml docker-compose.override.yml.example backend/Dockerfile .gitignore README.md
-git commit -m "chore: wire DATABASE_URL and a mounted master-key secret into Docker Compose"
+git add docker-compose.yml docker-compose.override.yml.example backend/Dockerfile .gitignore README.md .env.example
+git commit -m "chore: wire DATABASE_URL, APP_RUNTIME_PASSWORD, and a mounted master-key secret into Docker Compose"
 ```
 
 ---
