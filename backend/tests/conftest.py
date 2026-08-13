@@ -2,6 +2,7 @@ import os
 import tempfile
 
 import pytest
+import sqlalchemy as sa
 
 os.environ["ENVIRONMENT"] = "test"
 os.environ.setdefault(
@@ -22,3 +23,10 @@ def _clear_settings_cache():
     get_settings.cache_clear()
     yield
     get_settings.cache_clear()
+
+
+@pytest.fixture(scope="session")
+def db_engine():
+    engine = sa.create_engine(get_settings().database_url)
+    yield engine
+    engine.dispose()
