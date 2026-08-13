@@ -62,3 +62,45 @@ def test_app_runtime_query_with_correct_tenant_context_returns_the_row(db_engine
             assert len(rows) == 1
     finally:
         app_engine.dispose()
+
+
+def test_app_runtime_pooled_connection_reused_after_committed_tenant_context_still_returns_zero_rows(
+    db_engine,
+):
+    """Regression test for a pooled-connection GUC-reset gap.
+
+    Postgres does not revert a custom GUC like ``app.current_tenant_id`` to
+    NULL/unset once a transaction that called ``set_config(..., true)`` on it
+    commits -- it reverts to the empty string ''. SQLAlchemy's connection
+    pool reuses the same physical connection across separate logical
+    connections/requests, so a later request that never sets a tenant
+    context at all can inherit '' left over from an earlier request that
+    did. ``''::uuid`` raises ``InvalidTextRepresentation`` unless the RLS
+    policy guards against it with ``nullif(..., '')`` before the cast.
+
+    ``pool_size=1, max_overflow=0`` forces both connections below to be the
+    exact same physical Postgres connection.
+    """
+    tenant_id = _create_tenant_and_user(db_engine)
+    app_engine = sa.create_engine(
+        get_settings().app_database_url, pool_size=1, max_overflow=0
+    )
+    try:
+        # "Request" 1: sets tenant context via set_config(..., true) and
+        # commits, exactly like tenant_scoped_session would.
+        with app_engine.begin() as conn:
+            conn.execute(
+                sa.text("SELECT set_config('app.current_tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            rows = conn.execute(sa.select(User).where(User.tenant_id == tenant_id)).fetchall()
+            assert len(rows) == 1
+
+        # "Request" 2: reuses the same pooled physical connection (pool_size=1
+        # guarantees it) but sets no tenant context at all. Must return zero
+        # rows, not raise InvalidTextRepresentation from casting '' to uuid.
+        with app_engine.connect() as conn:
+            rows = conn.execute(sa.select(User).where(User.tenant_id == tenant_id)).fetchall()
+            assert rows == []
+    finally:
+        app_engine.dispose()
