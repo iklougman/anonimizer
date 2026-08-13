@@ -48,6 +48,54 @@ def test_no_tenant_context_returns_zero_rows():
         assert rows == []
 
 
+def test_tenant_context_survives_a_mid_block_commit():
+    """Regression: `set_config(..., true)` is transaction-local.
+
+    Setting it once at session open meant any `session.commit()` inside the `with`
+    block started a fresh transaction with no tenant context, so every later statement
+    in the block silently saw zero rows (and writes would fail the WITH CHECK policy).
+    The `after_begin` listener re-applies it per transaction, so the block keeps working.
+    """
+    tenant_id = _create_tenant("Tenant E")
+
+    with tenant_scoped_session(tenant_id) as session:
+        session.add(
+            User(
+                tenant_id=tenant_id,
+                keycloak_subject="subject-4",
+                email="doc4@example.com",
+                role="doctor",
+            )
+        )
+        # Caller commits mid-block: this ends the transaction the GUC was scoped to.
+        session.commit()
+
+        current = session.execute(
+            sa.text("SELECT current_setting('app.current_tenant_id', true)")
+        ).scalar_one()
+        assert current == str(tenant_id), (
+            "tenant context was lost after a mid-block commit (got %r)" % current
+        )
+
+        # Reads still see the tenant's rows...
+        rows = session.execute(sa.select(User).where(User.tenant_id == tenant_id)).scalars().all()
+        assert len(rows) == 1
+
+        # ...and writes still pass the WITH CHECK policy.
+        session.add(
+            User(
+                tenant_id=tenant_id,
+                keycloak_subject="subject-5",
+                email="doc5@example.com",
+                role="doctor",
+            )
+        )
+
+    with tenant_scoped_session(tenant_id) as session:
+        rows = session.execute(sa.select(User).where(User.tenant_id == tenant_id)).scalars().all()
+        assert len(rows) == 2
+
+
 def test_wrong_tenant_context_returns_zero_rows():
     tenant_a = _create_tenant("Tenant C")
     tenant_b = _create_tenant("Tenant D")
