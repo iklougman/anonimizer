@@ -116,6 +116,12 @@ def test_delete_mapping_removes_the_row(key_provider):
 
     assert vault.resolve_token(tenant_id, conversation_id, token) is None
 
+    with tenant_scoped_session(tenant_id) as session:
+        mapping = session.execute(
+            sa.select(TokenMapping).where(TokenMapping.token == token)
+        ).scalar_one_or_none()
+        assert mapping is None
+
 
 def test_expire_mapping_soft_deletes(key_provider):
     tenant_id, conversation_id = _create_tenant_and_conversation(key_provider)
