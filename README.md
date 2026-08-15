@@ -14,9 +14,23 @@ constitute GDPR compliance (see design doc §1).
    to `docker-compose.override.yml`, adjusting secrets as needed.
 2. Generate a local master key (wraps each tenant's data encryption key,
    ADR-0010): `mkdir -p secrets && head -c 32 /dev/urandom > secrets/master.key`
-3. `docker compose up --build`
-4. Backend health check: `curl http://localhost:8000/health`
-5. Frontend health check: `curl http://localhost:3000/api/healthz`
+3. Install the German spaCy model and fetch the reference datasets. Both are
+   build-time inputs (design spec §6) — `app/privacy_gateway/` never downloads
+   anything at runtime (ADR-0001):
+
+   ```bash
+   cd backend
+   python -m spacy download de_core_news_lg
+   python scripts/fetch_reference_data.py
+   ```
+
+   The fetch downloads the German ORDO OWL release (~51 MB, CC BY 4.0, Orphadata)
+   and the Destatis Krankenhausverzeichnis (~2.4 MB, free use with attribution)
+   into `backend/app/privacy_gateway/risk_scoring/data/`, which is gitignored. The
+   script skips files that are already present, so it is safe to re-run.
+4. `docker compose up --build`
+5. Backend health check: `curl http://localhost:8000/health`
+6. Frontend health check: `curl http://localhost:3000/api/healthz`
 
 ### Changing `APP_RUNTIME_PASSWORD`
 
@@ -43,6 +57,10 @@ runs.
 
 Requires a running Postgres (`docker compose up -d postgres`) and the
 local master key file from step 2 above.
+
+The detection tests need the `de_core_news_lg` model installed (step 3 above).
+They do **not** need the reference datasets — they inject small in-memory
+rare-disease and hospital sets instead.
 
 ```bash
 cd backend

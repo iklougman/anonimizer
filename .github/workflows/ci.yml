@@ -36,6 +36,13 @@ jobs:
         with:
           python-version: "3.12"
       - run: pip install -e ".[dev]"
+      - run: python -m spacy download de_core_news_lg
+      - name: Cache reference data
+        uses: actions/cache@v4
+        with:
+          path: backend/app/privacy_gateway/risk_scoring/data
+          key: reference-data-v1
+      - run: python scripts/fetch_reference_data.py
       - run: head -c 32 /dev/urandom > /tmp/ci-master.key
       - run: ruff check .
       - run: lint-imports

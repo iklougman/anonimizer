@@ -1,0 +1,5 @@
+# Design spec §6: the ORDO OWL (~50MB) and Krankenhausverzeichnis xlsx (~2MB) are
+# fetched at build time by backend/scripts/fetch_reference_data.py, never committed.
+# This file keeps the directory itself in git so the fetch script has a target.
+*
+!.gitignore

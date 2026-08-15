@@ -11,6 +11,7 @@ os.environ.setdefault(
     "postgresql+psycopg://chatgpt_proxy:change-me@localhost:5432/chatgpt_proxy",
 )
 os.environ.setdefault("APP_RUNTIME_PASSWORD", "change-me-app-runtime")
+os.environ.setdefault("WARM_REFERENCE_DATA_ON_STARTUP", "false")
 
 # Created at import time (not as a fixture) because MASTER_KEY_PATH must be set before
 # `app.config` is imported below. `delete=False` is required so the file survives being
