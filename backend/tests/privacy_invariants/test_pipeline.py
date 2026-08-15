@@ -7,6 +7,7 @@ from app.db.repositories.conversation_repository import ConversationRepository
 from app.db.repositories.tenant_repository import TenantRepository
 from app.db.repositories.user_repository import UserRepository
 from app.db.session import SessionLocal, tenant_scoped_session
+from app.privacy_gateway.detectors.base import Span
 from app.privacy_gateway.detectors.custom_recognizers import CustomRecognizers
 from app.privacy_gateway.detectors.presidio_detector import PresidioDetector
 from app.privacy_gateway.detectors.regex_detector import RegexDetector
@@ -15,6 +16,7 @@ from app.privacy_gateway.output_guard.guard import OutputGuard
 from app.privacy_gateway.pipeline import (
     HighRiskMessageError,
     LeakageDetectedError,
+    LowConfidenceSpanError,
     Pipeline,
     UnresolvedTokenError,
 )
@@ -54,6 +56,19 @@ def scope(key_provider):
 @pytest.fixture(scope="module")
 def detector_stack():
     return DetectorStack(RegexDetector(), PresidioDetector(), CustomRecognizers(HOSPITALS))
+
+
+class _StubDetectorStack:
+    """A minimal stand-in for DetectorStack that returns a fixed span list,
+    used to put a below-threshold-confidence span in front of the risk scorer
+    without depending on Presidio actually producing one (design spec §3;
+    see test_risk_scorer.py's own `_span(..., confidence=...)` pattern)."""
+
+    def __init__(self, spans):
+        self._spans = spans
+
+    def detect(self, text):
+        return self._spans
 
 
 @pytest.fixture
@@ -99,6 +114,26 @@ def test_sanitize_raises_on_the_high_risk_combination(scope, pipeline):
     )
     with pytest.raises(HighRiskMessageError):
         pipeline.sanitize(tenant_id, conversation_id, text)
+
+
+def test_low_confidence_span_propagates_out_of_sanitize(scope, key_provider):
+    """Design spec §3: a span below the confidence threshold blocks the whole
+    message, same fail-closed contract as HighRiskMessageError. sanitize() must
+    not catch or wrap it."""
+    tenant_id, conversation_id = scope
+    text = "Patient Lukas Berger wurde aufgenommen."
+    low_confidence_span = Span(8, 20, "PERSON", 0.2, "test")
+    vault = TokenVault(key_provider)
+    stub_detector_stack = _StubDetectorStack([low_confidence_span])
+    pipeline_with_stub_detector = Pipeline(
+        detector_stack=stub_detector_stack,
+        risk_scorer=RiskScorer(DISEASES),
+        pseudonymizer=Pseudonymizer(vault),
+        output_guard=OutputGuard(stub_detector_stack, vault),
+    )
+
+    with pytest.raises(LowConfidenceSpanError):
+        pipeline_with_stub_detector.sanitize(tenant_id, conversation_id, text)
 
 
 def test_a_rejected_message_writes_no_partially_sanitized_output(scope, pipeline):
