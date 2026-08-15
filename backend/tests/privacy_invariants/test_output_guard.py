@@ -6,6 +6,7 @@ from app.db.repositories.conversation_repository import ConversationRepository
 from app.db.repositories.tenant_repository import TenantRepository
 from app.db.repositories.user_repository import UserRepository
 from app.db.session import SessionLocal, tenant_scoped_session
+from app.privacy_gateway.detectors.base import Span
 from app.privacy_gateway.detectors.custom_recognizers import CustomRecognizers
 from app.privacy_gateway.detectors.presidio_detector import PresidioDetector
 from app.privacy_gateway.detectors.regex_detector import RegexDetector
@@ -109,6 +110,83 @@ def test_leakage_raises_rather_than_returning_partial_output(scope, guard, key_p
     )
     with pytest.raises(LeakageDetectedError):
         guard.restore(tenant_id, conversation_id, f"{token} am 12.03.2024 entlassen.")
+
+
+class _StubDetectorStack:
+    """Test double standing in for `DetectorStack`: returns a fixed set of spans
+    regardless of input.
+
+    The boundary behavior of `_inside_a_token`'s punctuation trim needs to be pinned
+    against a span that overlaps or merges with a token's own bounds — the exact
+    shape of the NER artifact that motivated the trim (a token plus adjacent
+    punctuation swept into one PERSON span). Driving that through the real
+    `DetectorStack` is not reliable: gluing text directly onto a token defeats
+    `TOKEN_PATTERN`'s own `\\b` boundary (so the token stops being recognized as a
+    token at all), and whatever spaCy's tokenizer then makes of the garbled result is
+    not deterministic. A stub isolates the check under test — `OutputGuard.restore`'s
+    span-vs-token-bounds containment logic — from spaCy's NER behavior entirely.
+    """
+
+    def __init__(self, spans: list[Span]) -> None:
+        self._spans = spans
+
+    def detect(self, text: str) -> list[Span]:
+        return self._spans
+
+
+def test_a_span_that_is_a_token_plus_only_trailing_punctuation_is_not_leakage(
+    scope, key_provider
+):
+    """Deterministic regression pin for the punctuation-trim fix: a single detected
+    span that covers exactly the token plus one adjacent punctuation character must
+    still resolve cleanly, not raise."""
+    tenant_id, conversation_id = scope
+    token = TokenVault(key_provider).create_mapping(
+        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
+    )
+    text = f"Bericht zu {token}."
+    token_start = text.index(token)
+    token_end = token_start + len(token)
+    span = Span(token_start, token_end + 1, "PATIENT", 0.85, "custom")  # +1 = the "."
+    guard = OutputGuard(_StubDetectorStack([span]), TokenVault(key_provider))
+
+    assert guard.restore(tenant_id, conversation_id, text) == "Bericht zu Lukas Berger."
+
+
+def test_a_span_that_merges_a_token_with_real_leaked_content_after_it_still_raises(
+    scope, key_provider
+):
+    """Pins the trim boundary from the other direction: a single detected span that
+    extends past the token's end into genuine word content (not punctuation) — the
+    shape a future edit would produce if `_inside_a_token`'s trim were accidentally
+    widened to strip word characters too, not just punctuation — must still raise
+    `LeakageDetectedError`."""
+    tenant_id, conversation_id = scope
+    token = TokenVault(key_provider).create_mapping(
+        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
+    )
+    leaked_suffix = "Lukas Berger"
+    text = f"{token}{leaked_suffix} wurde entlassen."
+    merged_span = Span(0, len(token) + len(leaked_suffix), "PATIENT", 0.85, "custom")
+    guard = OutputGuard(_StubDetectorStack([merged_span]), TokenVault(key_provider))
+
+    with pytest.raises(LeakageDetectedError):
+        guard.restore(tenant_id, conversation_id, text)
+
+
+def test_a_span_that_merges_real_leaked_content_before_a_token_still_raises(scope, key_provider):
+    """Same as above, mirrored: leaked content merged onto the *front* of a token."""
+    tenant_id, conversation_id = scope
+    token = TokenVault(key_provider).create_mapping(
+        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
+    )
+    leaked_prefix = "Lukas Berger"
+    text = f"{leaked_prefix}{token} entlassen."
+    merged_span = Span(0, len(leaked_prefix) + len(token), "PATIENT", 0.85, "custom")
+    guard = OutputGuard(_StubDetectorStack([merged_span]), TokenVault(key_provider))
+
+    with pytest.raises(LeakageDetectedError):
+        guard.restore(tenant_id, conversation_id, text)
 
 
 def test_a_fabricated_token_fails_closed(scope, guard):
