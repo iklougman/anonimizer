@@ -43,16 +43,13 @@ def test_non_orphanet_subjects_are_ignored():
 def test_hospital_names_come_from_the_khv_sheet_normalized():
     names = load_hospital_names(str(FIXTURES / "krankenhausverzeichnis_sample.xlsx"))
     assert "städtisches krankenhaus kiel gmbh" in names
-    # `normalize()` (Task 2) keeps only [0-9A-Za-zÄÖÜäöüß-], so "Charité" normalizes
-    # to "charit". Harmless for matching — message text goes through the same
-    # function — but it means the stored key is the truncated form.
-    assert "charit universitätsmedizin berlin" in names
+    assert "charité universitätsmedizin berlin" in names
     assert "katharinen hospiz am park" in names
 
 
 def test_hospital_names_include_the_standortname_column():
     names = load_hospital_names(str(FIXTURES / "krankenhausverzeichnis_sample.xlsx"))
-    assert "charit campus virchow klinikum" in names
+    assert "charité campus virchow klinikum" in names
 
 
 def test_hospital_header_row_and_banner_rows_are_not_treated_as_names():
@@ -85,4 +82,4 @@ def test_real_krankenhausverzeichnis_contains_known_facilities():
     names = load_hospital_names(str(DATA_DIR / KRANKENHAUSVERZEICHNIS_FILENAME))
     assert len(names) > 3_000
     assert "universitätsklinikum heidelberg" in names
-    assert "charit universitätsmedizin berlin" in names
+    assert "charité universitätsmedizin berlin" in names
