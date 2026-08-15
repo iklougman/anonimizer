@@ -80,6 +80,44 @@ def test_result_is_sorted_by_offset():
     assert [s.start for s in spans] == [0, 20]
 
 
+def test_pre_refine_sort_makes_the_patient_tiebreak_correct():
+    """CustomRecognizers' patient tie-break (Task 5) picks the surface that appears
+    earliest in the text when counts are tied, but it determines "earliest" from the
+    order of the span list it is handed -- it does not consult text offsets itself.
+    If DetectorStack handed it a list that was out of offset order, the tie-break
+    would silently promote the wrong PERSON to PATIENT.
+
+    Regex here "finds" the name that occurs *later* in the text; Presidio "finds"
+    the name that occurs *earlier*. Layer 1's output is concatenated before layer
+    2's, so the raw regex+presidio list is out of offset order -- and only the
+    intermediate `spans.sort()` in `DetectorStack.detect` (stack.py) fixes that
+    before CustomRecognizers ever sees it. Without that sort, "Peter Klein" (which
+    appears second) would win the tie instead of "Anna Weber" (which appears
+    first).
+    """
+    text = "Anna Weber wurde untersucht. Peter Klein wartete daneben."
+    anna_start = text.index("Anna Weber")
+    anna_end = anna_start + len("Anna Weber")
+    peter_start = text.index("Peter Klein")
+    peter_end = peter_start + len("Peter Klein")
+
+    peter_span = Span(peter_start, peter_end, "PERSON", 0.9, "regex")
+    anna_span = Span(anna_start, anna_end, "PERSON", 0.9, "presidio")
+
+    # Layer 1 (regex) reports the later-occurring name; layer 2 (Presidio) reports
+    # the earlier-occurring one -- so concatenating regex-then-Presidio output
+    # yields [peter_span, anna_span], which is out of offset order.
+    regex = _FakeDetector("regex", [peter_span])
+    presidio = _FakeDetector("presidio", [anna_span])
+
+    stack = DetectorStack(regex, presidio, CustomRecognizers(GAZETTEER))
+    result = stack.detect(text)
+
+    by_surface = {text[s.start : s.end]: s.entity_type for s in result}
+    assert by_surface["Anna Weber"] == "PATIENT"
+    assert by_surface["Peter Klein"] == "PERSON"
+
+
 @pytest.fixture(scope="module")
 def real_stack():
     return DetectorStack(
