@@ -21,6 +21,14 @@ def test_normalize_collapses_case_punctuation_and_whitespace():
     assert normalize("  Klinikum   Nürnberg, AöR ") == "klinikum nürnberg aör"
 
 
+def test_normalize_preserves_accented_letters_outside_the_german_alphabet():
+    """Facility and disease names carry loanword accents ("Charité", "Hôpital").
+    Dropping those letters would make the gazetteer key unrecoverable from the
+    surface form and silently cost recall."""
+    assert normalize("Charité Universitätsmedizin Berlin") == "charité universitätsmedizin berlin"
+    assert normalize("Hôpital Saint-Joseph") == "hôpital saint-joseph"
+
+
 def test_detects_insurance_number():
     text = "Die Versichertennummer lautet B987654321."
     spans = RegexDetector().detect(text, [])

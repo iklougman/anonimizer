@@ -35,7 +35,12 @@ def is_claimed(candidate: Span, claimed: Sequence[Span]) -> bool:
     return any(spans_overlap(candidate, existing) for existing in claimed)
 
 
-_WORD_PATTERN = re.compile(r"[0-9A-Za-zÄÖÜäöüß-]+")
+# Unicode-aware: Python 3's `\w` matches every Unicode letter and digit, not just
+# ASCII. A hardcoded ASCII + German-umlaut class silently dropped any other accented
+# letter, so "Charité" normalized to "charit" and "Hôpital" to "h pital" — a recall
+# gap for every loanword-origin facility or disease name. `\w` also matches the
+# underscore, which does not occur in clinical prose or facility names.
+_WORD_PATTERN = re.compile(r"[\w-]+")
 
 
 def normalize(value: str) -> str:
