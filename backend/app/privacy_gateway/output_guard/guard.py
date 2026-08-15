@@ -3,7 +3,6 @@ from __future__ import annotations
 import re
 import uuid
 
-from app.privacy_gateway.detectors.base import Span
 from app.privacy_gateway.detectors.stack import DetectorStack
 from app.privacy_gateway.token_vault.vault import TokenVault
 
@@ -44,13 +43,12 @@ class OutputGuard:
             (match.start(), match.end()) for match in TOKEN_PATTERN.finditer(llm_output)
         ]
 
-        # Step 1: re-run the full detector stack; anything detected outside a token is
-        # raw-looking PII the LLM produced or leaked.
-        leaked = [
-            span
-            for span in self._detector_stack.detect(llm_output)
-            if not _inside_a_token(llm_output, span, token_bounds)
-        ]
+        # Step 1: re-run the full detector stack over the output with every token
+        # masked out; anything still detected is raw-looking PII the LLM produced or
+        # leaked. Masking (rather than detecting on the raw output and then asking
+        # whether each span sits inside a token) is what makes this check stable —
+        # see _mask_tokens.
+        leaked = self._detector_stack.detect(_mask_tokens(llm_output, token_bounds))
         if leaked:
             raise LeakageDetectedError(
                 "raw-looking PII in LLM output: "
@@ -80,27 +78,34 @@ class OutputGuard:
         return restored
 
 
-def _inside_a_token(text: str, span: Span, token_bounds: list[tuple[int, int]]) -> bool:
-    """A detected span is "inside a token" if the token fully accounts for its
-    alphanumeric content.
+MASK_CHARACTER = "#"
 
-    Presidio's spaCy NER occasionally sweeps adjacent punctuation (most commonly a
-    sentence-final period right after a token) into a PERSON span, which
-    CustomRecognizers then promotes to PATIENT. A token itself is always pure
-    `[A-Z_0-9]` (see TOKEN_PATTERN) — it never contains punctuation — so trimming
-    leading/trailing non-alphanumeric characters off the detected span before the
-    containment check discards that NER artifact without weakening the check: any
-    span whose real (word) content extends beyond the token is still leakage.
+
+def _mask_tokens(text: str, token_bounds: list[tuple[int, int]]) -> str:
+    """Replace every token with an equal-length run of `#` before the leakage scan.
+
+    A token is a run of random hex glued to an uppercase type name — text no German
+    NER model has ever seen. Left in place it does not merely fail to be recognized,
+    it actively corrupts the tagging of the *surrounding* prose: `de_core_news_lg`
+    tags "Dr. DOCTOR_A9B8661…" as one PERSON, and sweeps whole clauses
+    ("HOSPITAL_… von Dr. DOCTOR_…") into a single LOCATION. Because the hex differs
+    on every call, which spans it invents differs run to run — measured over the
+    golden corpus, 11 of 21 notes intermittently failed their own round-trip that
+    way, with no PII having leaked at all.
+
+    Masking removes that input entirely and makes the scan deterministic. Equal
+    length keeps every offset in `token_bounds` valid for the restore step below.
+    `#` (not whitespace) because it preserves the sentence's token structure: a
+    masked run still occupies the slot a word occupied, whereas blanking it out
+    leaves a hole that shifts the tagging of neighbouring words ("… erfolgte am
+    <hole> nach Hause" makes "Hause" look like a LOCATION).
+
+    This does not weaken the check. Only the tokens are masked; every character the
+    LLM wrote outside them is scanned unchanged and in its original context, so real
+    PII next to a token — "PATIENT_1234567890 heißt in Wahrheit Lukas Berger" — is
+    still detected and still fails closed.
     """
-    trimmed_start, trimmed_end = _trim_punctuation(text, span.start, span.end)
-    return any(
-        start <= trimmed_start and trimmed_end <= end for start, end in token_bounds
-    )
-
-
-def _trim_punctuation(text: str, start: int, end: int) -> tuple[int, int]:
-    while start < end and not (text[start].isalnum() or text[start] == "_"):
-        start += 1
-    while end > start and not (text[end - 1].isalnum() or text[end - 1] == "_"):
-        end -= 1
-    return start, end
+    masked = text
+    for start, end in token_bounds:
+        masked = masked[:start] + MASK_CHARACTER * (end - start) + masked[end:]
+    return masked

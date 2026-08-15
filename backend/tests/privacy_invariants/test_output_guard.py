@@ -116,15 +116,16 @@ class _StubDetectorStack:
     """Test double standing in for `DetectorStack`: returns a fixed set of spans
     regardless of input.
 
-    The boundary behavior of `_inside_a_token`'s punctuation trim needs to be pinned
-    against a span that overlaps or merges with a token's own bounds — the exact
-    shape of the NER artifact that motivated the trim (a token plus adjacent
-    punctuation swept into one PERSON span). Driving that through the real
-    `DetectorStack` is not reliable: gluing text directly onto a token defeats
+    `OutputGuard.restore` masks every token before it scans (see `_mask_tokens`), so
+    the rule it enforces is unconditional: *anything* the detector reports on the
+    masked text is leakage, whatever its offsets. This stub pins that there is no
+    positional amnesty — no "it overlaps a token, so let it through" escape hatch of
+    the kind the previous containment check had to be given, and which a future edit
+    might be tempted to reintroduce. Driving those span shapes through the real
+    `DetectorStack` is not possible: gluing text directly onto a token defeats
     `TOKEN_PATTERN`'s own `\\b` boundary (so the token stops being recognized as a
     token at all), and whatever spaCy's tokenizer then makes of the garbled result is
-    not deterministic. A stub isolates the check under test — `OutputGuard.restore`'s
-    span-vs-token-bounds containment logic — from spaCy's NER behavior entirely.
+    not deterministic.
     """
 
     def __init__(self, spans: list[Span]) -> None:
@@ -134,33 +135,33 @@ class _StubDetectorStack:
         return self._spans
 
 
-def test_a_span_that_is_a_token_plus_only_trailing_punctuation_is_not_leakage(
-    scope, key_provider
-):
-    """Deterministic regression pin for the punctuation-trim fix: a single detected
-    span that covers exactly the token plus one adjacent punctuation character must
-    still resolve cleanly, not raise."""
+def test_ner_artifacts_around_a_token_are_not_leakage(scope, key_provider, detector_stack):
+    """Deterministic regression pin for the token-masking fix, driven by the real
+    detector stack: `de_core_news_lg` reads "Dr. DOCTOR_<random hex>" as a single
+    PERSON span, sweeping the title in with it, and elsewhere sweeps whole clauses
+    around a token into one LOCATION. Those spans are artifacts of the token's random
+    hex, not leaked PII, and must not make the guard reject its own sanitize()
+    output. Masking the token before the scan removes the artifact at its source, so
+    this resolves cleanly for every hex value rather than intermittently.
+    """
     tenant_id, conversation_id = scope
-    token = TokenVault(key_provider).create_mapping(
-        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
-    )
-    text = f"Bericht zu {token}."
-    token_start = text.index(token)
-    token_end = token_start + len(token)
-    span = Span(token_start, token_end + 1, "PATIENT", 0.85, "custom")  # +1 = the "."
-    guard = OutputGuard(_StubDetectorStack([span]), TokenVault(key_provider))
+    vault = TokenVault(key_provider)
+    token = vault.create_mapping(tenant_id, conversation_id, "DOCTOR", "Anna Schmitt")
+    guard = OutputGuard(detector_stack, vault)
 
-    assert guard.restore(tenant_id, conversation_id, text) == "Bericht zu Lukas Berger."
+    restored = guard.restore(
+        tenant_id, conversation_id, f"Die Befundung erfolgte durch Dr. {token}."
+    )
+
+    assert restored == "Die Befundung erfolgte durch Dr. Anna Schmitt."
 
 
 def test_a_span_that_merges_a_token_with_real_leaked_content_after_it_still_raises(
     scope, key_provider
 ):
-    """Pins the trim boundary from the other direction: a single detected span that
-    extends past the token's end into genuine word content (not punctuation) — the
-    shape a future edit would produce if `_inside_a_token`'s trim were accidentally
-    widened to strip word characters too, not just punctuation — must still raise
-    `LeakageDetectedError`."""
+    """Masking is applied to the token's own bounds only, never used to excuse a span
+    that reaches past them: a detected span extending from a token into genuine word
+    content must still raise `LeakageDetectedError`."""
     tenant_id, conversation_id = scope
     token = TokenVault(key_provider).create_mapping(
         tenant_id, conversation_id, "PATIENT", "Lukas Berger"
