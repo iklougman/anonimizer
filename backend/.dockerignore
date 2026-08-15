@@ -5,3 +5,5 @@ __pycache__/
 .ruff_cache/
 *.egg-info/
 tests/
+app/privacy_gateway/risk_scoring/data/*
+!app/privacy_gateway/risk_scoring/data/.gitignore
