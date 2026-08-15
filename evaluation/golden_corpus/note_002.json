@@ -1,0 +1,12 @@
+{
+  "id": "note_002",
+  "text": "Die Patientin Marie Hoffmann ist 67 Jahre alt und lebt in Regensburg. Telefonisch erreichbar unter 0941 5551234.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PATIENT", "text": "Marie Hoffmann", "start": 14, "end": 28},
+    {"entity_type": "AGE", "text": "67 Jahre alt", "start": 33, "end": 45},
+    {"entity_type": "LOCATION", "text": "Regensburg", "start": 58, "end": 68},
+    {"entity_type": "PHONE", "text": "0941 5551234", "start": 99, "end": 111}
+  ]
+}

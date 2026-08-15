@@ -1,0 +1,10 @@
+{
+  "id": "note_017",
+  "text": "Die Verlegung in die Charité Universitätsmedizin Berlin erfolgte am 08.04.2024.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "HOSPITAL", "text": "Charité Universitätsmedizin Berlin", "start": 21, "end": 55},
+    {"entity_type": "DATE", "text": "08.04.2024", "start": 68, "end": 78}
+  ]
+}

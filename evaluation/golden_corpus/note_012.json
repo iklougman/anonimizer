@@ -1,0 +1,12 @@
+{
+  "id": "note_012",
+  "text": "Hans Müller wurde am 14.06.2024 eingewiesen. Später berichtete Herr Müller über anhaltende Beschwerden. Hans Müller erhielt daraufhin eine Infusion.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PATIENT", "text": "Hans Müller", "start": 0, "end": 11},
+    {"entity_type": "DATE", "text": "14.06.2024", "start": 21, "end": 31},
+    {"entity_type": "PERSON", "text": "Herr Müller", "start": 63, "end": 74},
+    {"entity_type": "PATIENT", "text": "Hans Müller", "start": 104, "end": 115}
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "id": "note_016",
+  "text": "Der 7-jährige Patient Nico Wagner wurde in der Notaufnahme in Rostock vorgestellt.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "AGE", "text": "7-jährige", "start": 4, "end": 13},
+    {"entity_type": "PATIENT", "text": "Nico Wagner", "start": 22, "end": 33},
+    {"entity_type": "LOCATION", "text": "Rostock", "start": 62, "end": 69}
+  ]
+}

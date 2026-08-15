@@ -1,0 +1,12 @@
+{
+  "id": "note_020",
+  "text": "Entlassbrief vom 30.10.2024: Georg Ackermann wurde beschwerdefrei nach Hause entlassen. Die Weiterbehandlung übernimmt Dr. Claudia Neumann in Augsburg.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "DATE", "text": "30.10.2024", "start": 17, "end": 27},
+    {"entity_type": "PATIENT", "text": "Georg Ackermann", "start": 29, "end": 44},
+    {"entity_type": "DOCTOR", "text": "Claudia Neumann", "start": 123, "end": 138},
+    {"entity_type": "LOCATION", "text": "Augsburg", "start": 142, "end": 150}
+  ]
+}

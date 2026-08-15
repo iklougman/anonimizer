@@ -1,0 +1,13 @@
+{
+  "id": "note_001",
+  "text": "Patient Lukas Berger, Versichertennummer A123456789, wurde am 12.03.2024 im Universitätsklinikum Heidelberg von Dr. Anna Schmitt aufgenommen.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PATIENT", "text": "Lukas Berger", "start": 8, "end": 20},
+    {"entity_type": "INSURANCE_NUMBER", "text": "A123456789", "start": 41, "end": 51},
+    {"entity_type": "DATE", "text": "12.03.2024", "start": 62, "end": 72},
+    {"entity_type": "HOSPITAL", "text": "Universitätsklinikum Heidelberg", "start": 76, "end": 107},
+    {"entity_type": "DOCTOR", "text": "Anna Schmitt", "start": 116, "end": 128}
+  ]
+}

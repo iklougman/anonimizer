@@ -1,0 +1,10 @@
+{
+  "id": "note_009",
+  "text": "Telefonische Rücksprache mit der Angehörigen unter +49 30 1234567 am 03.01.2025.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PHONE", "text": "+49 30 1234567", "start": 51, "end": 65},
+    {"entity_type": "DATE", "text": "03.01.2025", "start": 69, "end": 79}
+  ]
+}

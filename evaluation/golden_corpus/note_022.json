@@ -1,0 +1,12 @@
+{
+  "id": "note_022",
+  "text": "Der 19-jährige Patient Simon Kraus aus Tübingen wurde am 11.05.2024 mit der Diagnose Zystische Fibrose vorgestellt.",
+  "expected_outcome": "high_risk_rejected",
+  "rare_diseases": ["Zystische Fibrose"],
+  "entities": [
+    {"entity_type": "AGE", "text": "19-jährige", "start": 4, "end": 14},
+    {"entity_type": "PATIENT", "text": "Simon Kraus", "start": 23, "end": 34},
+    {"entity_type": "LOCATION", "text": "Tübingen", "start": 39, "end": 47},
+    {"entity_type": "DATE", "text": "11.05.2024", "start": 57, "end": 67}
+  ]
+}

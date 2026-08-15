@@ -1,0 +1,10 @@
+{
+  "id": "note_011",
+  "text": "Die Überweisung an das MVZ Gesundheitszentrum Ost erfolgte durch Dr. Hannes Bauer.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "HOSPITAL", "text": "MVZ Gesundheitszentrum Ost", "start": 23, "end": 49},
+    {"entity_type": "DOCTOR", "text": "Hannes Bauer", "start": 69, "end": 81}
+  ]
+}

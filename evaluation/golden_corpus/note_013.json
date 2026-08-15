@@ -1,0 +1,13 @@
+{
+  "id": "note_013",
+  "text": "Elena Fischer ist 34 Jahre alt und kommt aus Leipzig. Sie ist erreichbar unter elena.fischer@example.com oder 0341 4455667.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PATIENT", "text": "Elena Fischer", "start": 0, "end": 13},
+    {"entity_type": "AGE", "text": "34 Jahre alt", "start": 18, "end": 30},
+    {"entity_type": "LOCATION", "text": "Leipzig", "start": 45, "end": 52},
+    {"entity_type": "EMAIL", "text": "elena.fischer@example.com", "start": 79, "end": 104},
+    {"entity_type": "PHONE", "text": "0341 4455667", "start": 110, "end": 122}
+  ]
+}

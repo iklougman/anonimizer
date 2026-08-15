@@ -1,0 +1,12 @@
+{
+  "id": "note_003",
+  "text": "Aufnahme von Jonas Weber am 05.11.2023 im Klinikum Nürnberg. Behandelnder Arzt ist Prof. Peter Krüger.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PATIENT", "text": "Jonas Weber", "start": 13, "end": 24},
+    {"entity_type": "DATE", "text": "05.11.2023", "start": 28, "end": 38},
+    {"entity_type": "HOSPITAL", "text": "Klinikum Nürnberg", "start": 42, "end": 59},
+    {"entity_type": "DOCTOR", "text": "Peter Krüger", "start": 89, "end": 101}
+  ]
+}

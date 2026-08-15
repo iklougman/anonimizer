@@ -1,0 +1,10 @@
+{
+  "id": "note_018",
+  "text": "Rückfragen bitte an station3@klinikum-example.de oder telefonisch unter 0221 9876543.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "EMAIL", "text": "station3@klinikum-example.de", "start": 20, "end": 48},
+    {"entity_type": "PHONE", "text": "0221 9876543", "start": 72, "end": 84}
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "note_005",
+  "text": "Patientennummer: 4471029. Die Entlassung erfolgte am 28.02.2024 nach Hause.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PATIENT_NUMBER", "text": "4471029", "start": 17, "end": 24},
+    {"entity_type": "DATE", "text": "28.02.2024", "start": 53, "end": 63}
+  ]
+}

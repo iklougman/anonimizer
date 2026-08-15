@@ -1,0 +1,10 @@
+{
+  "id": "note_021",
+  "text": "Bei dem 41-jährigen Patienten Martin Seidel besteht eine gesicherte Huntington-Krankheit.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": ["Huntington-Krankheit"],
+  "entities": [
+    {"entity_type": "AGE", "text": "41-jährigen", "start": 8, "end": 19},
+    {"entity_type": "PATIENT", "text": "Martin Seidel", "start": 30, "end": 43}
+  ]
+}

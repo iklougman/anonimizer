@@ -1,0 +1,12 @@
+{
+  "id": "note_004",
+  "text": "Sabine Vogel ist eine 52-jährige Patientin aus Kassel. Rückfragen an s.vogel@example.de.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PATIENT", "text": "Sabine Vogel", "start": 0, "end": 12},
+    {"entity_type": "AGE", "text": "52-jährige", "start": 22, "end": 32},
+    {"entity_type": "LOCATION", "text": "Kassel", "start": 47, "end": 53},
+    {"entity_type": "EMAIL", "text": "s.vogel@example.de", "start": 69, "end": 87}
+  ]
+}

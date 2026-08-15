@@ -1,0 +1,12 @@
+{
+  "id": "note_006",
+  "text": "Herr Tobias Lang wurde von Dr. Miriam Falk im Krankenhaus Sankt Elisabeth untersucht. Der Bericht geht an praxis.falk@example.org.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PATIENT", "text": "Tobias Lang", "start": 5, "end": 16},
+    {"entity_type": "DOCTOR", "text": "Miriam Falk", "start": 31, "end": 42},
+    {"entity_type": "HOSPITAL", "text": "Krankenhaus Sankt Elisabeth", "start": 46, "end": 73},
+    {"entity_type": "EMAIL", "text": "praxis.falk@example.org", "start": 106, "end": 129}
+  ]
+}

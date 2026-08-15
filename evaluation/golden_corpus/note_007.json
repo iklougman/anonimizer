@@ -1,0 +1,11 @@
+{
+  "id": "note_007",
+  "text": "Lea Sommer stellte sich zur Kontrolle vor. Begleitet wurde Lea Sommer von ihrer Mutter Ingrid Sommer.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PATIENT", "text": "Lea Sommer", "start": 0, "end": 10},
+    {"entity_type": "PATIENT", "text": "Lea Sommer", "start": 59, "end": 69},
+    {"entity_type": "PERSON", "text": "Ingrid Sommer", "start": 87, "end": 100}
+  ]
+}

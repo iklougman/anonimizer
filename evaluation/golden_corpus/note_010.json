@@ -1,0 +1,12 @@
+{
+  "id": "note_010",
+  "text": "Karl Reinhardt ist ein 81-jähriger Patient. Fallnummer: 8830145. Er wohnt in Dortmund.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PATIENT", "text": "Karl Reinhardt", "start": 0, "end": 14},
+    {"entity_type": "AGE", "text": "81-jähriger", "start": 23, "end": 34},
+    {"entity_type": "PATIENT_NUMBER", "text": "8830145", "start": 56, "end": 63},
+    {"entity_type": "LOCATION", "text": "Dortmund", "start": 77, "end": 85}
+  ]
+}

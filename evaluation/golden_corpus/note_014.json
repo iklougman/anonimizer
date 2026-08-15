@@ -1,0 +1,11 @@
+{
+  "id": "note_014",
+  "text": "Die Kontrolle erfolgte am 22.09.2024. Versichertennummer C112233445. Patientennummer: 9012347.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "DATE", "text": "22.09.2024", "start": 26, "end": 36},
+    {"entity_type": "INSURANCE_NUMBER", "text": "C112233445", "start": 57, "end": 67},
+    {"entity_type": "PATIENT_NUMBER", "text": "9012347", "start": 86, "end": 93}
+  ]
+}

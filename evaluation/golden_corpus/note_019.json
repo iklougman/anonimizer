@@ -1,0 +1,11 @@
+{
+  "id": "note_019",
+  "text": "Fatima Demir ist eine 29-jährige Patientin. Behandelnder Arzt ist Dr. Stefan Roth.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "PATIENT", "text": "Fatima Demir", "start": 0, "end": 12},
+    {"entity_type": "AGE", "text": "29-jährige", "start": 22, "end": 32},
+    {"entity_type": "DOCTOR", "text": "Stefan Roth", "start": 70, "end": 81}
+  ]
+}

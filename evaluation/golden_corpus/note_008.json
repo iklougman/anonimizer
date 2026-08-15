@@ -1,0 +1,11 @@
+{
+  "id": "note_008",
+  "text": "Die Versichertennummer lautet B987654321. Die Aufnahme erfolgte am 19.07.2024 in Bremen.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "INSURANCE_NUMBER", "text": "B987654321", "start": 30, "end": 40},
+    {"entity_type": "DATE", "text": "19.07.2024", "start": 67, "end": 77},
+    {"entity_type": "LOCATION", "text": "Bremen", "start": 81, "end": 87}
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "id": "note_015",
+  "text": "Prof. Ulrike Brandt vom Universitätsklinikum Freiburg empfiehlt eine Kontrolle in sechs Monaten.",
+  "expected_outcome": "sanitized",
+  "rare_diseases": [],
+  "entities": [
+    {"entity_type": "DOCTOR", "text": "Ulrike Brandt", "start": 6, "end": 19},
+    {"entity_type": "HOSPITAL", "text": "Universitätsklinikum Freiburg", "start": 24, "end": 53}
+  ]
+}
