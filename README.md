@@ -74,6 +74,21 @@ ruff check .
 lint-imports
 ```
 
+### Golden-corpus regression
+
+`backend/tests/privacy_invariants/test_pipeline_corpus.py` runs the whole
+`evaluation/golden_corpus/` through `sanitize()` and asserts that no annotated
+raw PII string survives, that every note round-trips through `deanonymize()`,
+and that cross-tenant / cross-conversation token resolution always fails. It
+runs in CI on every push (design doc §9).
+
+If a note starts failing, fix the detector — do not edit the note. The only
+sanctioned exception is a genuine `de_core_news_lg` recall gap, which goes in
+that file's `KNOWN_RECALL_GAPS` set with a comment recording what the model
+produced instead. Its counterpart `KNOWN_GUARD_FALSE_POSITIVES` records the
+mirror-image case — a note the output guard rejects on a model *precision*
+gap — under the same rule.
+
 ## Frontend tests
 
 ```bash
