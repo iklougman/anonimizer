@@ -1,3 +1,5 @@
+import unicodedata
+
 from app.privacy_gateway.detectors.base import Span, is_claimed, normalize, spans_overlap
 from app.privacy_gateway.detectors.regex_detector import RegexDetector
 
@@ -27,6 +29,17 @@ def test_normalize_preserves_accented_letters_outside_the_german_alphabet():
     surface form and silently cost recall."""
     assert normalize("Charité Universitätsmedizin Berlin") == "charité universitätsmedizin berlin"
     assert normalize("Hôpital Saint-Joseph") == "hôpital saint-joseph"
+
+
+def test_normalize_composes_decomposed_accents_before_matching():
+    """macOS filesystem APIs and some input methods emit NFD, where "é" is "e"
+    plus a standalone combining acute. `\\w` does not match combining marks, so
+    without the NFC pass the accent would vanish and NFD input would miss the
+    NFC-keyed gazetteer entry."""
+    decomposed = unicodedata.normalize("NFD", "Charité Universitätsmedizin Berlin")
+    assert decomposed != "Charité Universitätsmedizin Berlin"
+    assert normalize(decomposed) == normalize("Charité Universitätsmedizin Berlin")
+    assert normalize(decomposed) == "charité universitätsmedizin berlin"
 
 
 def test_detects_insurance_number():

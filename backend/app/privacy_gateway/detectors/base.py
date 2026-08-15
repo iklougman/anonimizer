@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol, runtime_checkable
@@ -47,8 +48,14 @@ def normalize(value: str) -> str:
     """Case-folded, punctuation-stripped, single-spaced form used for every
     gazetteer and rare-disease-name comparison, so both sides of a lookup are
     normalized identically.
+
+    Unicode-normalized to NFC first so a decomposed accented character (base
+    letter + separate combining mark, as some OSes/input methods produce) is
+    composed into one codepoint before `\\w` is applied — `\\w` matches Unicode
+    letters but not standalone combining marks, so NFD input would otherwise
+    silently lose its accent even though NFC input survives.
     """
-    return " ".join(_WORD_PATTERN.findall(value)).casefold()
+    return " ".join(_WORD_PATTERN.findall(unicodedata.normalize("NFC", value))).casefold()
 
 
 @runtime_checkable
