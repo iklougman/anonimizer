@@ -91,7 +91,11 @@ def test_round_trip_restores_the_original_note(note, corpus_pipeline, corpus_sco
         # precision gap, and this pins that behavior so that fixing the gap (or
         # regressing further) shows up here rather than passing silently.
         assert false_positive in sanitized
-        with pytest.raises(LeakageDetectedError):
+        # Matched on the documented entity type, not just on the exception class: an
+        # unrelated — and genuinely worse — leak appearing in this note must fail
+        # here rather than pass under the comment above, which would then quietly
+        # stop being true.
+        with pytest.raises(LeakageDetectedError, match=r"\bPATIENT at\b"):
             corpus_pipeline.deanonymize(tenant_id, conversation_id, sanitized)
         return
 

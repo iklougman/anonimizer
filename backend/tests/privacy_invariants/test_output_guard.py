@@ -156,6 +156,30 @@ def test_ner_artifacts_around_a_token_are_not_leakage(scope, key_provider, detec
     assert restored == "Die Befundung erfolgte durch Dr. Anna Schmitt."
 
 
+def test_an_ner_detected_name_beside_a_live_token_is_still_leakage(
+    scope, key_provider, detector_stack
+):
+    """The security boundary of the masking fix, driven by the real model.
+
+    Masking a token must not buy its neighbours any amnesty. The dangerous shape is
+    a name — the one entity class only layer 2's NER can see, and the class the mask
+    exists to stop spaCy hallucinating around — sitting immediately beside a live
+    token, which is exactly what a prompt-injected "who is PATIENT_…, really?" would
+    produce. `test_leakage_raises_rather_than_returning_partial_output` covers the
+    same adjacency for a layer 1 regex type, which never depended on NER context at
+    all; this one covers the case that does.
+    """
+    tenant_id, conversation_id = scope
+    vault = TokenVault(key_provider)
+    token = vault.create_mapping(tenant_id, conversation_id, "PATIENT", "Lukas Berger")
+    guard = OutputGuard(detector_stack, vault)
+
+    with pytest.raises(LeakageDetectedError, match="PATIENT at"):
+        guard.restore(
+            tenant_id, conversation_id, f"{token} heißt in Wahrheit Lukas Berger."
+        )
+
+
 def test_a_span_that_merges_a_token_with_real_leaked_content_after_it_still_raises(
     scope, key_provider
 ):
