@@ -1528,17 +1528,19 @@ class OpenAIProvider:
     ) -> None:
         self.model = model
         self._base_url = base_url.rstrip("/")
-        self._http_client = (
-            http_client
-            if http_client is not None
-            else httpx.Client(timeout=120.0, headers={"Authorization": f"Bearer {api_key}"})
-        )
+        # The Authorization header is sent per-request (not baked into the client at
+        # construction time) so an injected test http_client still gets it -- baking
+        # it into a default-constructed client only helps when no http_client is
+        # passed in, which defeats the point of the constructor parameter in tests.
+        self._api_key = api_key
+        self._http_client = http_client if http_client is not None else httpx.Client(timeout=120.0)
 
     def complete(self, prompt: str) -> LLMCompletion:
         try:
             response = self._http_client.post(
                 f"{self._base_url}/chat/completions",
                 json={"model": self.model, "messages": [{"role": "user", "content": prompt}]},
+                headers={"Authorization": f"Bearer {self._api_key}"},
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
@@ -1570,8 +1572,6 @@ Expected: PASS (6 passed).
 `backend/tests/unit/test_llm_registry.py`:
 
 ```python
-import pytest
-
 from app.config import Settings
 from app.llm_gateway.ollama_provider import OllamaProvider
 from app.llm_gateway.openai_provider import OpenAIProvider
