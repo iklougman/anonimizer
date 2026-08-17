@@ -2207,6 +2207,7 @@ from fastapi.testclient import TestClient
 
 from app.auth.dependencies import get_current_user
 from app.auth.tenant_resolver import AuthenticatedUser
+from app.config import get_settings
 from app.db.repositories.conversation_repository import ConversationRepository
 from app.db.repositories.message_repository import MessageRepository
 from app.db.repositories.tenant_repository import TenantRepository
@@ -2218,10 +2219,15 @@ from app.privacy_gateway.token_vault.key_provider import FileSecretKeyProvider
 
 
 @pytest.fixture
-def scope(tmp_path):
-    master_key_path = tmp_path / "master.key"
-    master_key_path.write_bytes(bytes(range(32)))
-    key_provider = FileSecretKeyProvider(str(master_key_path))
+def scope():
+    # Must use the same master key as the process-wide get_pipeline()'s TokenVault
+    # (Settings.master_key_path, set up once in tests/conftest.py) -- a tenant's DEK
+    # is wrapped with this key at creation, and get_pipeline()'s vault (used by the
+    # conversations API routes) unwraps it with the same key at deanonymize() time.
+    # A private per-test tmp_path master key would wrap the DEK under a different
+    # key than get_pipeline() unwraps with, raising cryptography.hazmat's
+    # InvalidUnwrap the first time a route calls Pipeline.deanonymize().
+    key_provider = FileSecretKeyProvider(get_settings().master_key_path)
     with SessionLocal() as session:
         tenant = TenantRepository(session, key_provider).create(
             name="Clinic", keycloak_realm=f"realm-{uuid.uuid4()}", retention_days=30
@@ -2344,7 +2350,7 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.api.schemas import ConversationSummary, MessageOut
@@ -2412,12 +2418,17 @@ def delete_conversation(
     conversation_id: uuid.UUID,
     user: AuthenticatedUser = Depends(get_current_user),
     session: Session = Depends(get_db_session),
-) -> None:
+) -> Response:
+    # A route returning `None` still gets FastAPI's default JSON serialization,
+    # which fails Starlette's own assertion that a 204 must carry no body -- an
+    # explicit empty Response is required, not just the `status_code=204` decorator
+    # argument.
     repo = ConversationRepository(session)
     conversation = repo.get(user.tenant_id, conversation_id)
     if conversation is None or conversation.user_id != user.user_id:
         raise HTTPException(status_code=404, detail="conversation not found")
     repo.soft_delete(user.tenant_id, conversation_id)
+    return Response(status_code=204)
 ```
 
 - [ ] **Step 5: Register the router and CORS middleware in `backend/app/main.py`**
@@ -2520,6 +2531,7 @@ from fastapi.testclient import TestClient
 
 from app.auth.dependencies import get_current_user
 from app.auth.tenant_resolver import AuthenticatedUser
+from app.config import get_settings
 from app.db.repositories.conversation_repository import ConversationRepository
 from app.db.repositories.tenant_repository import TenantRepository
 from app.db.repositories.user_repository import UserRepository
@@ -2558,10 +2570,12 @@ class _StubProvider:
 
 
 @pytest.fixture
-def scope(tmp_path):
-    master_key_path = tmp_path / "master.key"
-    master_key_path.write_bytes(bytes(range(32)))
-    key_provider = FileSecretKeyProvider(str(master_key_path))
+def scope():
+    # Same reasoning as Task 7's test_conversations_api.py::scope -- the send-message
+    # route depends on the process-wide get_pipeline(), whose TokenVault always
+    # unwraps DEKs with Settings.master_key_path. A private per-test master key would
+    # make Pipeline.deanonymize() raise InvalidUnwrap on the success-path test below.
+    key_provider = FileSecretKeyProvider(get_settings().master_key_path)
     with SessionLocal() as session:
         tenant = TenantRepository(session, key_provider).create(
             name="Clinic", keycloak_realm=f"realm-{uuid.uuid4()}", retention_days=30
