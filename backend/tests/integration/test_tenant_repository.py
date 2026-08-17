@@ -37,3 +37,22 @@ def test_get_returns_none_for_unknown_tenant():
     with SessionLocal() as session:
         repo = TenantRepository(session, key_provider=None)
         assert repo.get(uuid.uuid4()) is None
+
+
+def test_create_accepts_an_explicit_tenant_id(tmp_path):
+    master_key_path = tmp_path / "master.key"
+    master_key_path.write_bytes(bytes(range(32)))
+    key_provider = FileSecretKeyProvider(str(master_key_path))
+    fixed_id = uuid.uuid4()
+
+    with SessionLocal() as session:
+        repo = TenantRepository(session, key_provider)
+        tenant = repo.create(
+            name="Fixed Clinic",
+            keycloak_realm=f"realm-{uuid.uuid4()}",
+            retention_days=30,
+            tenant_id=fixed_id,
+        )
+        session.commit()
+
+    assert tenant.id == fixed_id

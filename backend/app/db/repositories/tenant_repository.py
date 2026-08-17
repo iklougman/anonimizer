@@ -28,8 +28,19 @@ class TenantRepository:
         self.session = session
         self.key_provider = key_provider
 
-    def create(self, name: str, keycloak_realm: str, retention_days: int) -> Tenant:
-        tenant = Tenant(name=name, keycloak_realm=keycloak_realm, retention_days=retention_days)
+    def create(
+        self,
+        name: str,
+        keycloak_realm: str,
+        retention_days: int,
+        tenant_id: uuid.UUID | None = None,
+    ) -> Tenant:
+        tenant = Tenant(
+            id=tenant_id if tenant_id is not None else uuid.uuid4(),
+            name=name,
+            keycloak_realm=keycloak_realm,
+            retention_days=retention_days,
+        )
         self.session.add(tenant)
         self.session.flush()
 

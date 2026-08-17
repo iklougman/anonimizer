@@ -1,7 +1,7 @@
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings
 from sqlalchemy.engine import make_url
 
@@ -28,6 +28,31 @@ class Settings(BaseSettings):
     # spec §6) costs minutes and gigabytes; the test suite injects small in-memory
     # reference sets instead, so it turns the warm-up off.
     warm_reference_data_on_startup: bool = True
+
+    # Backend-chat-slice design doc §2: two separate Keycloak URLs because inside
+    # Docker Compose the backend reaches Keycloak via the service name, while the
+    # browser (and therefore the token's `iss` claim) uses localhost.
+    keycloak_issuer_url: str = "http://localhost:8080/realms/chatgpt-proxy-dev"
+    keycloak_jwks_url: str = (
+        "http://keycloak:8080/realms/chatgpt-proxy-dev/protocol/openid-connect/certs"
+    )
+    keycloak_audience: str = "chatgpt-proxy-frontend"
+
+    # ADR-0016 / ADR-0022: both providers ship in the MVP.
+    llm_provider: Literal["ollama", "openai"] = "ollama"
+    ollama_base_url: str = "http://ollama:11434"
+    ollama_model: str = "llama3.1"
+    openai_api_key: str | None = None
+    openai_model: str = "gpt-4o-mini"
+
+    @model_validator(mode="after")
+    def _require_openai_key_when_selected(self) -> "Settings":
+        # ADR-0020: fail closed on misconfiguration at startup, not at first request.
+        if self.llm_provider == "openai" and not self.openai_api_key:
+            raise ValueError(
+                "OPENAI_API_KEY is required when LLM_PROVIDER=openai"
+            )
+        return self
 
     @property
     def app_database_url(self) -> str:

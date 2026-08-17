@@ -80,3 +80,50 @@ def test_app_database_url_derives_from_database_url_with_app_runtime_credentials
     monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
     settings = Settings(_env_file=None)
     assert settings.app_database_url == "postgresql+psycopg://app_runtime:runtime-secret@dbhost:5432/mydb"
+
+
+def test_settings_auth_and_llm_defaults(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
+    monkeypatch.setenv("MASTER_KEY_PATH", "/run/secrets/master_key")
+    monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
+    for var in [
+        "KEYCLOAK_ISSUER_URL", "KEYCLOAK_JWKS_URL", "KEYCLOAK_AUDIENCE",
+        "LLM_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL",
+        "OLLAMA_BASE_URL", "OLLAMA_MODEL",
+    ]:
+        monkeypatch.delenv(var, raising=False)
+    settings = Settings(_env_file=None)
+    assert settings.keycloak_issuer_url == "http://localhost:8080/realms/chatgpt-proxy-dev"
+    assert settings.keycloak_jwks_url == (
+        "http://keycloak:8080/realms/chatgpt-proxy-dev/protocol/openid-connect/certs"
+    )
+    assert settings.keycloak_audience == "chatgpt-proxy-frontend"
+    assert settings.llm_provider == "ollama"
+    assert settings.openai_api_key is None
+    assert settings.openai_model == "gpt-4o-mini"
+    assert settings.ollama_base_url == "http://ollama:11434"
+    assert settings.ollama_model == "llama3.1"
+
+
+def test_settings_rejects_openai_provider_without_an_api_key(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
+    monkeypatch.setenv("MASTER_KEY_PATH", "/run/secrets/master_key")
+    monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
+def test_settings_accepts_openai_provider_with_an_api_key(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
+    monkeypatch.setenv("MASTER_KEY_PATH", "/run/secrets/master_key")
+    monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
+    monkeypatch.setenv("LLM_PROVIDER", "openai")
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    settings = Settings(_env_file=None)
+    assert settings.llm_provider == "openai"
+    assert settings.openai_api_key == "sk-test"

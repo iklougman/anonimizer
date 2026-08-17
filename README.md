@@ -29,8 +29,27 @@ constitute GDPR compliance (see design doc §1).
    into `backend/app/privacy_gateway/risk_scoring/data/`, which is gitignored. The
    script skips files that are already present, so it is safe to re-run.
 4. `docker compose up --build`
-5. Backend health check: `curl http://localhost:8000/health`
-6. Frontend health check: `curl http://localhost:3000/api/healthz`
+5. Seed the two dev tenants/users that match `keycloak/realm-export.json`
+   (idempotent, safe to re-run):
+
+   ```bash
+   cd backend
+   python scripts/seed_dev_tenants.py
+   ```
+
+   Keycloak imports `chatgpt-proxy-dev` automatically on container start. Test
+   logins: `dr.mueller` / `dev-password` (Clinic A) and `dr.klein` /
+   `dev-password` (Clinic B), both against
+   `http://localhost:8080/realms/chatgpt-proxy-dev`. To fetch a token without a
+   browser (useful for `curl`-testing the API directly):
+
+   ```bash
+   curl -s http://localhost:8080/realms/chatgpt-proxy-dev/protocol/openid-connect/token \
+     -d grant_type=password -d client_id=chatgpt-proxy-frontend \
+     -d username=dr.mueller -d password=dev-password | jq -r .access_token
+   ```
+6. Backend health check: `curl http://localhost:8000/health`
+7. Frontend health check: `curl http://localhost:3000/api/healthz`
 
 ### Changing `APP_RUNTIME_PASSWORD`
 
