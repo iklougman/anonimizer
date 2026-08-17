@@ -108,6 +108,42 @@ produced instead. Its counterpart `KNOWN_GUARD_FALSE_POSITIVES` records the
 mirror-image case — a note the output guard rejects on a model *precision*
 gap — under the same rule.
 
+### Manual end-to-end check
+
+Not part of the default `pytest` run (it makes a real Ollama call and needs
+the full stack up):
+
+```bash
+docker compose up -d
+cd backend && python scripts/seed_dev_tenants.py
+TOKEN=$(curl -s http://localhost:8080/realms/chatgpt-proxy-dev/protocol/openid-connect/token \
+  -d grant_type=password -d client_id=chatgpt-proxy-frontend \
+  -d username=dr.mueller -d password=dev-password | jq -r .access_token)
+
+CONVERSATION_ID=$(curl -s -X POST http://localhost:8000/api/conversations \
+  -H "Authorization: Bearer $TOKEN" | jq -r .id)
+
+curl -N -X POST "http://localhost:8000/api/conversations/$CONVERSATION_ID/messages" \
+  -H "Authorization: Bearer $TOKEN" -H "Content-Type: application/json" \
+  -d '{"content": "Patientin Anna Schmitt, 45 Jahre, aus Heidelberg."}'
+```
+
+Expected: an `event: token` / `event: done` SSE stream. To verify no raw
+identifier crossed the LLM boundary, inspect the persisted
+`llm_requests.sanitized_prompt` row for this conversation and confirm it
+contains `PATIENT_...`/`LOCATION_...`-shaped tokens instead of "Anna Schmitt"
+/ "Heidelberg":
+
+```bash
+docker compose exec postgres psql -U $POSTGRES_USER -d $POSTGRES_DB \
+  -c "SELECT sanitized_prompt FROM llm_requests ORDER BY created_at DESC LIMIT 1;"
+```
+
+Switch to OpenAI by setting `LLM_PROVIDER=openai` and `OPENAI_API_KEY` in
+`.env`, then `docker compose up -d --build backend` and repeat — this is the
+concrete check for ADR-0022's "the external provider never sees the identity
+mapping" claim against a real network call.
+
 ## Frontend tests
 
 ```bash
