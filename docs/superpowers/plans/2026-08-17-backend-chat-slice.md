@@ -2650,8 +2650,9 @@ def test_high_risk_message_is_rejected_with_422(scope, authenticated, tmp_path):
     # with an injected rare-disease set -- avoids depending on the real reference
     # data containing "Marfan-Syndrom", and proves HighRiskMessageError propagates
     # through the route as a 422 without ever calling the LLM provider.
-    key_provider = FileSecretKeyProvider(str(tmp_path / "high-risk-master.key"))
+    # FileSecretKeyProvider reads the key file eagerly in __init__ -- write it first.
     (tmp_path / "high-risk-master.key").write_bytes(bytes(range(32)))
+    key_provider = FileSecretKeyProvider(str(tmp_path / "high-risk-master.key"))
     vault = TokenVault(key_provider)
     detector_stack = DetectorStack(RegexDetector(), PresidioDetector(), CustomRecognizers(frozenset()))
     test_pipeline = Pipeline(
