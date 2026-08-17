@@ -314,6 +314,17 @@ Expected: PASS, including the new test and the pre-existing `test_create_tenant_
             "access.token.claim": "true",
             "userinfo.token.claim": "true"
           }
+        },
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "chatgpt-proxy-frontend",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
         }
       ]
     }
@@ -356,6 +367,8 @@ Expected: PASS, including the new test and the pre-existing `test_create_tenant_
 ```
 
 **Discovered during Step 16's verification (not obvious from the schema alone):** Keycloak 24's "Verify Profile" required action is enabled by default and resolves dynamically at login time — even with `requiredActions: []` stored on the user — whenever `firstName`/`lastName` are absent, and the direct-grant (ROPC) flow cannot satisfy it interactively, failing with `invalid_grant: Account is not fully set up`. Both `firstName`/`lastName` above are required for the manual E2E `curl` token flow (Step 14 / Task 10) to work, not optional flavor text.
+
+**Discovered while validating Task 2's `JWTValidator` against a real token from this realm:** without an explicit audience protocol mapper, Keycloak does not put the client's own `clientId` in the access token's `aud` claim at all (confirmed by decoding a real token — no `aud` key present), so `jwt.decode(..., audience=...)` fails every token with `MissingRequiredClaimError: aud`. The `oidc-audience-mapper` above (`included.client.audience: "chatgpt-proxy-frontend"`) is required, not optional — this is the second correction the `audience`/`id.token.claim`/`access.token.claim` config values above already include.
 
 - [ ] **Step 11: Wire the realm import and new env vars into `docker-compose.yml`**
 

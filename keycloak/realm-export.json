@@ -27,6 +27,17 @@
             "access.token.claim": "true",
             "userinfo.token.claim": "true"
           }
+        },
+        {
+          "name": "audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "chatgpt-proxy-frontend",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
         }
       ]
     }
