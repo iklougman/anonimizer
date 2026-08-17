@@ -97,3 +97,21 @@ def new_scope(key_provider) -> tuple[uuid.UUID, uuid.UUID]:
 @pytest.fixture
 def corpus_scope(corpus_key_provider) -> tuple[uuid.UUID, uuid.UUID]:
     return new_scope(corpus_key_provider)
+
+
+def new_scope_with_user(key_provider) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
+    """Like new_scope(), but also returns the user id -- needed by the chat-API
+    corpus test to build an AuthenticatedUser for dependency_overrides."""
+    with SessionLocal() as session:
+        tenant = TenantRepository(session, key_provider).create(
+            name="Clinic", keycloak_realm=f"realm-{uuid.uuid4()}", retention_days=30
+        )
+        session.commit()
+        tenant_id = tenant.id
+    with tenant_scoped_session(tenant_id) as session:
+        user = UserRepository(session).create(
+            tenant_id, keycloak_subject=f"sub-{uuid.uuid4()}", email="doc@example.com", role="doctor"
+        )
+        user_id = user.id
+        conversation_id = ConversationRepository(session).create(tenant_id, user_id).id
+    return tenant_id, user_id, conversation_id
