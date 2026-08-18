@@ -20,13 +20,20 @@ export default function ConversationPage() {
   const [items, setItems] = useState<DisplayItem[]>([]);
   const [pendingAssistantText, setPendingAssistantText] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
+  const [loadError, setLoadError] = useState(false);
 
-  useEffect(() => {
+  function loadMessages() {
     if (!session?.accessToken) return;
-    getMessages(session.accessToken, conversationId).then((messages) => {
-      setItems(messages.map((message) => ({ kind: "message", message })));
-    });
-  }, [session?.accessToken, conversationId]);
+    setLoadError(false);
+    getMessages(session.accessToken, conversationId)
+      .then((messages) => {
+        setItems(messages.map((message) => ({ kind: "message", message })));
+      })
+      .catch(() => setLoadError(true));
+  }
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(loadMessages, [session?.accessToken, conversationId]);
 
   async function handleSend(content: string) {
     if (!session?.accessToken) return;
@@ -82,6 +89,12 @@ export default function ConversationPage() {
   return (
     <>
       <div className={styles.messages}>
+        {loadError && (
+          <MessageBubble
+            error={{ status: 500, message: "Conversation could not be loaded." }}
+            onRetry={loadMessages}
+          />
+        )}
         {items.map((item, index) =>
           item.kind === "message" ? (
             <MessageBubble key={item.message.id} message={item.message} />
