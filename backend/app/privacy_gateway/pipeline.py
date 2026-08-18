@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import logging
 import uuid
+from collections import Counter
 from functools import lru_cache
 
 from app.config import get_settings
@@ -37,6 +39,8 @@ __all__ = [
     "sanitize",
 ]
 
+logger = logging.getLogger(__name__)
+
 
 class Pipeline:
     def __init__(
@@ -57,18 +61,65 @@ class Pipeline:
         """Design spec §4: runs all three detector layers, risk-scores every span,
         raises on HIGH-risk or low-confidence, else returns the fully pseudonymized
         string ready to send to an LLM.
+
+        Every step logs its result at INFO, and every fail-closed rejection logs at
+        WARNING before the exception propagates -- entity types, counts, positions,
+        and category labels only, never the matched text itself, so the log stream
+        stays within the same privacy boundary this pipeline enforces on the LLM.
         """
         spans = self._detector_stack.detect(text)
-        assessment = self._risk_scorer.score(text, spans)
-        return self._pseudonymizer.apply(
+        span_counts = dict(Counter(span.entity_type for span in spans))
+        logger.info(
+            "sanitize.detect tenant_id=%s conversation_id=%s spans=%d types=%s",
+            tenant_id, conversation_id, len(spans), span_counts,
+        )
+
+        try:
+            assessment = self._risk_scorer.score(text, spans)
+        except (LowConfidenceSpanError, HighRiskMessageError) as exc:
+            logger.warning(
+                "sanitize.reject tenant_id=%s conversation_id=%s reason=%s: %s",
+                tenant_id, conversation_id, type(exc).__name__, exc,
+            )
+            raise
+
+        logger.info(
+            "sanitize.risk_assessment tenant_id=%s conversation_id=%s "
+            "quasi_identifier_categories=%s rare_disease_matches=%d tokens_to_issue=%d",
+            tenant_id,
+            conversation_id,
+            sorted(assessment.quasi_identifier_categories),
+            len(assessment.rare_diseases),
+            len(assessment.tokenize),
+        )
+
+        result = self._pseudonymizer.apply(
             tenant_id, conversation_id, text, assessment.tokenize
         )
+        logger.info(
+            "sanitize.pseudonymize tenant_id=%s conversation_id=%s tokens_issued=%d -> PASS",
+            tenant_id, conversation_id, len(assessment.tokenize),
+        )
+        return result
 
     def deanonymize(
         self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, llm_output: str
     ) -> str:
         """Design spec §5: leakage scan, then authorization-checked token resolution."""
-        return self._output_guard.restore(tenant_id, conversation_id, llm_output)
+        try:
+            result = self._output_guard.restore(tenant_id, conversation_id, llm_output)
+        except (LeakageDetectedError, UnresolvedTokenError) as exc:
+            logger.warning(
+                "deanonymize.reject tenant_id=%s conversation_id=%s reason=%s: %s",
+                tenant_id, conversation_id, type(exc).__name__, exc,
+            )
+            raise
+
+        logger.info(
+            "deanonymize.restore tenant_id=%s conversation_id=%s -> PASS",
+            tenant_id, conversation_id,
+        )
+        return result
 
 
 @lru_cache(maxsize=1)

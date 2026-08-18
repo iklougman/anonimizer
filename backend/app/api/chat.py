@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import time
 import uuid
 from collections.abc import Iterator
@@ -23,6 +24,8 @@ from app.privacy_gateway.pipeline import Pipeline, get_pipeline
 from app.privacy_gateway.risk_scoring.scorer import HighRiskMessageError, LowConfidenceSpanError
 
 router = APIRouter(prefix="/api/conversations", tags=["messages"])
+
+logger = logging.getLogger(__name__)
 
 FAIL_CLOSED_MESSAGE = "Sensitive information could not be safely processed."
 _CHUNK_WORDS = 3
@@ -63,6 +66,11 @@ def send_message(
     if conversation is None or conversation.user_id != user.user_id:
         raise HTTPException(status_code=404, detail="conversation not found")
 
+    logger.info(
+        "chat.receive tenant_id=%s conversation_id=%s user_id=%s length=%d",
+        user.tenant_id, conversation_id, user.user_id, len(body.content),
+    )
+
     try:
         sanitized_prompt = pipeline.sanitize(user.tenant_id, conversation_id, body.content)
     except (LowConfidenceSpanError, HighRiskMessageError) as exc:
@@ -79,14 +87,33 @@ def send_message(
     conversation_repo.touch(user.tenant_id, conversation_id)
     session.commit()
 
+    logger.info(
+        "chat.llm_call tenant_id=%s conversation_id=%s provider=%s model=%s",
+        user.tenant_id, conversation_id, provider.name, provider.model,
+    )
     started_at = time.monotonic()
     try:
         completion = provider.complete(sanitized_prompt)
     except LLMProviderError as exc:
+        logger.warning(
+            "chat.llm_call FAILED tenant_id=%s conversation_id=%s provider=%s model=%s: %s",
+            user.tenant_id, conversation_id, provider.name, provider.model, exc,
+        )
         raise HTTPException(
             status_code=502, detail="the language model provider is unavailable"
         ) from exc
     latency_ms = int((time.monotonic() - started_at) * 1000)
+    logger.info(
+        "chat.llm_response tenant_id=%s conversation_id=%s provider=%s model=%s "
+        "latency_ms=%d tokens_in=%d tokens_out=%d",
+        user.tenant_id,
+        conversation_id,
+        provider.name,
+        provider.model,
+        latency_ms,
+        completion.tokens_in,
+        completion.tokens_out,
+    )
 
     try:
         human_readable = pipeline.deanonymize(user.tenant_id, conversation_id, completion.text)
@@ -100,6 +127,10 @@ def send_message(
             actor=str(user.user_id),
         )
         session.commit()
+        logger.info(
+            "chat.audit_event tenant_id=%s conversation_id=%s event_type=%s recorded",
+            user.tenant_id, conversation_id, type(exc).__name__,
+        )
         raise HTTPException(
             status_code=500, detail="the response could not be safely returned"
         ) from exc
@@ -124,6 +155,11 @@ def send_message(
     )
     conversation_repo.touch(user.tenant_id, conversation_id)
     session.commit()
+
+    logger.info(
+        "chat.complete tenant_id=%s conversation_id=%s message_id=%s -> PASS",
+        user.tenant_id, conversation_id, assistant_message.id,
+    )
 
     return StreamingResponse(
         _replay_as_sse(human_readable, assistant_message.id, assistant_message.created_at),
