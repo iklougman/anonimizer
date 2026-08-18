@@ -27,3 +27,32 @@ export interface Me {
   branch_name: string | null;
   permissions: string[];
 }
+
+export type Role = "super_admin" | "doctor" | "staff";
+
+export interface Branch {
+  id: string;
+  name: string;
+  user_count: number;
+  created_at: string;
+}
+
+export interface AdminUser {
+  id: string;
+  email: string;
+  role: Role;
+  branch_id: string | null;
+  is_active: boolean;
+  created_at: string;
+}
+
+export interface AdminUserCreated extends AdminUser {
+  invite_email_sent: boolean;
+}
+
+export interface PermissionMatrix {
+  roles: string[];
+  permissions: string[];
+  defaults: Record<string, string[]>;
+  matrix: Record<string, Record<string, boolean>>;
+}

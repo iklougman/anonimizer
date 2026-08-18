@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import {
   createConversation,
   deleteConversation,
@@ -22,6 +23,7 @@ export function ConversationSidebar({ activeConversationId }: { activeConversati
   // than briefly flashing enabled -- fails closed on the loading state too.
   const canCreate = me?.permissions.includes("conversations:create") ?? false;
   const canDeleteAny = me?.permissions.includes("conversations:delete:any") ?? false;
+  const hasAdminAccess = me?.permissions.some((p) => p.startsWith("admin:")) ?? false;
 
   useEffect(() => {
     // A refresh failure (e.g. the Keycloak refresh token itself expired)
@@ -122,6 +124,11 @@ export function ConversationSidebar({ activeConversationId }: { activeConversati
           </div>
         );
       })}
+      {hasAdminAccess && (
+        <Link href="/admin" className={styles.adminLink}>
+          Verwaltung
+        </Link>
+      )}
     </nav>
   );
 }

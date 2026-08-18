@@ -119,4 +119,26 @@ describe("ConversationSidebar", () => {
     expect(await screen.findByText("colleague")).toBeInTheDocument();
     expect(screen.queryByLabelText("Delete Anfrage Patient A")).not.toBeInTheDocument();
   });
+
+  it("shows the Verwaltung link when the user holds an admin permission", async () => {
+    mockUseMe.mockReturnValue({
+      ...ME_FULL_PERMISSIONS,
+      permissions: ["conversations:create", "admin:users:manage"],
+    });
+    vi.spyOn(conversationsApi, "listConversations").mockResolvedValue([]);
+
+    render(<ConversationSidebar />);
+
+    expect(await screen.findByText("Verwaltung")).toBeInTheDocument();
+  });
+
+  it("hides the Verwaltung link without any admin permission", async () => {
+    mockUseMe.mockReturnValue({ ...ME_FULL_PERMISSIONS, permissions: ["conversations:create"] });
+    vi.spyOn(conversationsApi, "listConversations").mockResolvedValue([]);
+
+    render(<ConversationSidebar />);
+
+    await waitFor(() => expect(conversationsApi.listConversations).toHaveBeenCalled());
+    expect(screen.queryByText("Verwaltung")).not.toBeInTheDocument();
+  });
 });

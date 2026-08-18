@@ -1,5 +1,6 @@
 import "./globals.css";
 import { SessionProviderWrapper } from "@/components/SessionProviderWrapper";
+import { MeProvider } from "@/components/MeProvider";
 
 export default function RootLayout({
   children,
@@ -9,7 +10,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <SessionProviderWrapper>{children}</SessionProviderWrapper>
+        <SessionProviderWrapper>
+          <MeProvider>{children}</MeProvider>
+        </SessionProviderWrapper>
       </body>
     </html>
   );

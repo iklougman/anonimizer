@@ -108,3 +108,17 @@
 .retryButton:hover {
   background: var(--color-error-border);
 }
+
+.adminLink {
+  margin-top: auto;
+  padding: 10px;
+  border-top: 1px solid var(--color-border);
+  color: var(--color-text-muted);
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.adminLink:hover {
+  color: var(--color-text);
+}
