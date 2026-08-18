@@ -21,6 +21,10 @@ services:
     environment:
       KEYCLOAK_ADMIN: ${KEYCLOAK_ADMIN}
       KEYCLOAK_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD}
+      KC_HOSTNAME: localhost
+      KC_HOSTNAME_PORT: 8080
+      KC_HOSTNAME_STRICT_HTTPS: "false"
+      KC_HTTP_ENABLED: "true"
     volumes:
       - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
     ports:
@@ -62,10 +66,18 @@ services:
 
   frontend:
     build: ./frontend
+    environment:
+      NEXTAUTH_URL: http://localhost:${FRONTEND_PORT:-3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      KEYCLOAK_CLIENT_ID: chatgpt-proxy-frontend
+      KEYCLOAK_ISSUER: http://localhost:8080/realms/chatgpt-proxy-dev
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080/realms/chatgpt-proxy-dev
+      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
     depends_on:
       - backend
+      - keycloak
 
 volumes:
   postgres_data:
