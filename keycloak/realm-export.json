@@ -60,6 +60,38 @@
       }
     },
     {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "username": "dr.weber",
+      "email": "dr.weber@clinic-a.example",
+      "firstName": "Julia",
+      "lastName": "Weber",
+      "enabled": true,
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [
+        {"type": "password", "value": "dev-password", "temporary": false}
+      ],
+      "attributes": {
+        "tenant_id": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]
+      }
+    },
+    {
+      "id": "44444444-4444-4444-8444-444444444444",
+      "username": "empfang.schmidt",
+      "email": "empfang.schmidt@clinic-a.example",
+      "firstName": "Sabine",
+      "lastName": "Schmidt",
+      "enabled": true,
+      "emailVerified": true,
+      "requiredActions": [],
+      "credentials": [
+        {"type": "password", "value": "dev-password", "temporary": false}
+      ],
+      "attributes": {
+        "tenant_id": ["aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"]
+      }
+    },
+    {
       "id": "22222222-2222-4222-8222-222222222222",
       "username": "dr.klein",
       "email": "dr.klein@clinic-b.example",

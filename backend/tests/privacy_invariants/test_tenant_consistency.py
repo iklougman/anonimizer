@@ -77,3 +77,42 @@ def test_message_with_matching_tenant_is_accepted():
                 sanitized_content="in-tenant message",
             )
         )
+
+
+def test_user_cannot_reference_another_tenants_branch():
+    """Migration 0006's fk_users_tenant_branch: same composite-FK invariant as 0004,
+    for the users -> branches relationship."""
+    from app.db.repositories.branch_repository import BranchRepository
+
+    tenant_a = _create_tenant("Consistency Tenant D")
+    tenant_b = _create_tenant("Consistency Tenant E")
+
+    with tenant_scoped_session(tenant_b) as session:
+        branch_b = BranchRepository(session).create(tenant_b, "Fremde Filiale").id
+
+    with pytest.raises(IntegrityError):
+        with tenant_scoped_session(tenant_a) as session:
+            UserRepository(session).create(
+                tenant_a,
+                keycloak_subject=f"subject-{uuid.uuid4()}",
+                email="doc@example.com",
+                role="doctor",
+                branch_id=branch_b,
+            )
+
+
+def test_user_with_same_tenant_branch_is_accepted():
+    from app.db.repositories.branch_repository import BranchRepository
+
+    tenant_a = _create_tenant("Consistency Tenant F")
+
+    with tenant_scoped_session(tenant_a) as session:
+        branch_a = BranchRepository(session).create(tenant_a, "Eigene Filiale").id
+        user = UserRepository(session).create(
+            tenant_a,
+            keycloak_subject=f"subject-{uuid.uuid4()}",
+            email="doc@example.com",
+            role="doctor",
+            branch_id=branch_a,
+        )
+        assert user.branch_id == branch_a

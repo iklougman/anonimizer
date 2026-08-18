@@ -7,8 +7,10 @@ from fastapi import Depends, HTTPException, Request
 from sqlalchemy.orm import Session
 
 from app.auth.jwt_validator import InvalidTokenError, JWTValidator, KeycloakUnreachableError
+from app.auth.permissions import Permission
 from app.auth.tenant_resolver import (
     AuthenticatedUser,
+    InactiveUserError,
     UnknownTenantError,
     UnknownUserError,
     resolve_authenticated_user,
@@ -55,6 +57,25 @@ def get_current_user(
         return resolve_user(claims)
     except (UnknownTenantError, UnknownUserError) as exc:
         raise HTTPException(status_code=401, detail="invalid token") from exc
+    except InactiveUserError as exc:
+        # 403, not 401: the identity is valid, the account is disabled. The
+        # frontend can show a real message instead of bouncing to login.
+        raise HTTPException(status_code=403, detail="account deactivated") from exc
+
+
+def require_permission(permission: Permission):
+    """Dependency factory gating an endpoint on one permission.
+
+    super_admin passes every check by construction (resolve_permissions returns
+    ALL_PERMISSIONS for it), so admin lock-out is impossible.
+    """
+
+    def _check(user: AuthenticatedUser = Depends(get_current_user)) -> AuthenticatedUser:
+        if permission not in user.permissions:
+            raise HTTPException(status_code=403, detail="insufficient permissions")
+        return user
+
+    return _check
 
 
 def get_db_session(user: AuthenticatedUser = Depends(get_current_user)) -> Iterator[Session]:

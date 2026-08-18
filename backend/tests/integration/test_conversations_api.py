@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.dependencies import get_current_user
+from app.auth.permissions import DEFAULT_PERMISSIONS
 from app.auth.tenant_resolver import AuthenticatedUser
 from app.config import get_settings
 from app.db.repositories.conversation_repository import ConversationRepository
@@ -41,7 +42,12 @@ def scope():
 def client(scope):
     tenant_id, user_id = scope
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
-        tenant_id=tenant_id, user_id=user_id, role="doctor"
+        tenant_id=tenant_id,
+        user_id=user_id,
+        role="doctor",
+        branch_id=None,
+        email="doc@example.com",
+        permissions=DEFAULT_PERMISSIONS["doctor"],
     )
     yield TestClient(app)
     app.dependency_overrides.pop(get_current_user, None)

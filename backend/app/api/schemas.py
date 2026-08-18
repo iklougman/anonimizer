@@ -22,3 +22,14 @@ class MessageOut(BaseModel):
 
 class SendMessageIn(BaseModel):
     content: str
+
+
+class MeOut(BaseModel):
+    user_id: uuid.UUID
+    tenant_id: uuid.UUID
+    tenant_name: str
+    email: str
+    role: str
+    branch_id: uuid.UUID | None
+    branch_name: str | None
+    permissions: list[str]

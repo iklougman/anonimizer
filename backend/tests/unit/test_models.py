@@ -5,6 +5,8 @@ def test_all_tables_registered():
     expected = {
         "tenants",
         "users",
+        "branches",
+        "tenant_role_permissions",
         "conversations",
         "messages",
         "token_mappings",
@@ -18,6 +20,8 @@ def test_all_tables_registered():
 def test_tenant_scoped_tables_have_tenant_id_column():
     tenant_scoped = {
         "users",
+        "branches",
+        "tenant_role_permissions",
         "conversations",
         "messages",
         "token_mappings",

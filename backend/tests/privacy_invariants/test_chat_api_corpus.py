@@ -4,6 +4,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.auth.dependencies import get_current_user
+from app.auth.permissions import DEFAULT_PERMISSIONS
 from app.auth.tenant_resolver import AuthenticatedUser
 from app.llm_gateway.provider import LLMCompletion
 from app.llm_gateway.registry import get_provider
@@ -35,7 +36,12 @@ def test_outbound_llm_prompt_never_contains_raw_corpus_pii(
     recording_provider = _RecordingProvider()
 
     app.dependency_overrides[get_current_user] = lambda: AuthenticatedUser(
-        tenant_id=tenant_id, user_id=user_id, role="doctor"
+        tenant_id=tenant_id,
+        user_id=user_id,
+        role="doctor",
+        branch_id=None,
+        email="doc@example.com",
+        permissions=DEFAULT_PERMISSIONS["doctor"],
     )
     app.dependency_overrides[get_pipeline] = lambda: corpus_pipeline
     app.dependency_overrides[get_provider] = lambda: recording_provider

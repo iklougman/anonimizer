@@ -3,7 +3,13 @@ import uuid
 import pytest
 
 from app.auth.jwt_validator import TokenClaims
-from app.auth.tenant_resolver import UnknownTenantError, UnknownUserError, resolve_authenticated_user
+from app.auth.permissions import ALL_PERMISSIONS, DEFAULT_PERMISSIONS
+from app.auth.tenant_resolver import (
+    InactiveUserError,
+    UnknownTenantError,
+    UnknownUserError,
+    resolve_authenticated_user,
+)
 from app.db.repositories.tenant_repository import TenantRepository
 from app.db.repositories.user_repository import UserRepository
 from app.db.session import SessionLocal, tenant_scoped_session
@@ -40,6 +46,29 @@ def test_resolves_a_known_tenant_and_user(tmp_path):
     assert result.tenant_id == tenant_id
     assert result.user_id == user_id
     assert result.role == "doctor"
+    assert result.email == "doc@example.com"
+    assert result.branch_id is None
+    assert result.permissions == DEFAULT_PERMISSIONS["doctor"]
+
+
+def test_super_admin_resolves_with_all_permissions(tmp_path):
+    tenant_id, _ = _create_tenant_and_user(tmp_path, role="super_admin")
+    claims = TokenClaims(tenant_id=tenant_id, keycloak_subject="sub-1")
+
+    result = resolve_authenticated_user(claims)
+
+    assert result.role == "super_admin"
+    assert result.permissions == ALL_PERMISSIONS
+
+
+def test_deactivated_user_is_rejected(tmp_path):
+    tenant_id, user_id = _create_tenant_and_user(tmp_path)
+    with tenant_scoped_session(tenant_id) as session:
+        UserRepository(session).update(tenant_id, user_id, is_active=False)
+
+    claims = TokenClaims(tenant_id=tenant_id, keycloak_subject="sub-1")
+    with pytest.raises(InactiveUserError):
+        resolve_authenticated_user(claims)
 
 
 def test_unknown_tenant_id_is_rejected():
