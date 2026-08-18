@@ -1,0 +1,57 @@
+.row {
+  display: flex;
+  margin-bottom: 12px;
+}
+
+.rowUser {
+  justify-content: flex-end;
+}
+
+.rowAssistant {
+  justify-content: flex-start;
+}
+
+.bubble {
+  max-width: 70%;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  line-height: 1.5;
+  font-size: 14.5px;
+  white-space: pre-wrap;
+}
+
+.bubbleUser {
+  background: var(--color-accent);
+  color: var(--color-accent-contrast);
+}
+
+.bubbleAssistant {
+  background: var(--color-bg-subtle);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+}
+
+.bubbleError {
+  background: var(--color-error-bg);
+  border: 1px solid var(--color-error-border);
+  color: var(--color-error-text);
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.retryButton {
+  background: none;
+  border: 1px solid var(--color-error-text);
+  color: var(--color-error-text);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.retryButton:hover {
+  background: var(--color-error-text);
+  color: #fff;
+}
