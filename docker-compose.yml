@@ -49,6 +49,10 @@ services:
       KEYCLOAK_ISSUER_URL: http://localhost:8080/realms/chatgpt-proxy-dev
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/chatgpt-proxy-dev/protocol/openid-connect/certs
       KEYCLOAK_AUDIENCE: chatgpt-proxy-frontend
+      KEYCLOAK_ADMIN_BASE_URL: http://keycloak:8080
+      KEYCLOAK_ADMIN_REALM: chatgpt-proxy-dev
+      KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-chatgpt-proxy-backend-admin}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-}
       LLM_PROVIDER: ${LLM_PROVIDER:-ollama}
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://ollama:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1}

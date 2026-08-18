@@ -35,9 +35,13 @@ from app.config import get_settings  # noqa: E402
 
 @pytest.fixture(autouse=True)
 def _clear_settings_cache():
+    from app.auth.dependencies import get_keycloak_admin_client
+
     get_settings.cache_clear()
+    get_keycloak_admin_client.cache_clear()
     yield
     get_settings.cache_clear()
+    get_keycloak_admin_client.cache_clear()
 
 
 @pytest.fixture(scope="session")

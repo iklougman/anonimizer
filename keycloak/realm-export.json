@@ -40,9 +40,30 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "chatgpt-proxy-backend-admin",
+      "enabled": true,
+      "publicClient": false,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "secret": "dev-backend-admin-secret",
+      "attributes": {
+        "clientAuthenticatorType": "client-secret"
+      }
     }
   ],
   "users": [
+    {
+      "username": "service-account-chatgpt-proxy-backend-admin",
+      "serviceAccountClientId": "chatgpt-proxy-backend-admin",
+      "enabled": true,
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users"]
+      }
+    },
     {
       "id": "11111111-1111-4111-8111-111111111111",
       "username": "dr.mueller",
@@ -107,5 +128,17 @@
         "tenant_id": ["bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb"]
       }
     }
-  ]
+  ],
+  "components": {
+    "org.keycloak.userprofile.UserProfileProvider": [
+      {
+        "providerId": "declarative-user-profile",
+        "config": {
+          "kc.user.profile.config": [
+            "{\"attributes\":[{\"name\":\"username\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"email\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"firstName\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false},{\"name\":\"lastName\",\"permissions\":{\"view\":[\"admin\",\"user\"],\"edit\":[\"admin\",\"user\"]},\"multivalued\":false}],\"groups\":[],\"unmanagedAttributePolicy\":\"ENABLED\"}"
+          ]
+        }
+      }
+    ]
+  }
 }

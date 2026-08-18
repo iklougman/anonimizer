@@ -17,6 +17,7 @@ from app.auth.tenant_resolver import (
 )
 from app.config import get_settings
 from app.db.session import tenant_scoped_session
+from app.keycloak_admin.client import KeycloakAdminClient
 
 
 @lru_cache(maxsize=1)
@@ -76,6 +77,23 @@ def require_permission(permission: Permission):
         return user
 
     return _check
+
+
+@lru_cache(maxsize=1)
+def get_keycloak_admin_client() -> KeycloakAdminClient | None:
+    """None when unconfigured -- POST /api/admin/users then only supports
+    "link an existing Keycloak subject" mode. Overridable in tests, matching
+    the get_user_resolver precedent, so admin API tests can exercise the
+    provisioning path with a fake client instead of a real Keycloak."""
+    settings = get_settings()
+    if not settings.keycloak_admin_client_id or not settings.keycloak_admin_client_secret:
+        return None
+    return KeycloakAdminClient(
+        base_url=settings.keycloak_admin_base_url,
+        realm=settings.keycloak_admin_realm,
+        client_id=settings.keycloak_admin_client_id,
+        client_secret=settings.keycloak_admin_client_secret,
+    )
 
 
 def get_db_session(user: AuthenticatedUser = Depends(get_current_user)) -> Iterator[Session]:

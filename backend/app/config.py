@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     )
     keycloak_audience: str = "chatgpt-proxy-frontend"
 
+    # Optional: user provisioning via POST /api/admin/users falls back to
+    # "link an existing Keycloak subject" mode when these are unset, so a
+    # missing admin client degrades a feature rather than blocking startup.
+    keycloak_admin_base_url: str = "http://keycloak:8080"
+    keycloak_admin_realm: str = "chatgpt-proxy-dev"
+    keycloak_admin_client_id: str | None = None
+    keycloak_admin_client_secret: str | None = None
+
     # ADR-0016 / ADR-0022: both providers ship in the MVP.
     llm_provider: Literal["ollama", "openai"] = "ollama"
     ollama_base_url: str = "http://ollama:11434"
