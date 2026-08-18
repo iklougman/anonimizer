@@ -152,3 +152,27 @@ npm install
 npm test
 npm run build
 ```
+
+### Manual end-to-end check
+
+```bash
+docker compose up -d --build frontend
+open http://localhost:3000
+```
+
+Expected: redirected to Keycloak's hosted login page (not a custom form).
+Log in as `dr.mueller` / `dev-password`. You should land on the chat shell
+with an empty sidebar. Click "+ Neue Anfrage", send a message, and confirm:
+
+- A typing indicator shows while the backend buffers sanitize → LLM →
+  deanonymize (no partial/raw text appears before the first `token` event).
+- The reply streams in word-by-word once it starts.
+- The conversation gets a title (derived from your first message) after
+  the first exchange, and appears in the sidebar.
+- Refreshing the page keeps you logged in and reloads the conversation
+  history correctly (proves the NextAuth session and `GET .../messages`
+  round-trip both work).
+
+To see the 422 fail-closed path, send a message combining several
+identifying details (age + city + a rare disease name + a date) and
+confirm it renders as an inline error with no retry button.

@@ -227,10 +227,16 @@ describe("authOptions", () => {
 
   describe("session callback", () => {
     it("exposes the access token and error on the session", async () => {
-      const session = await authOptions.callbacks!.session!({
+      // next-auth v4's own callback type declares the return as
+      // `Session | DefaultSession` regardless of our module augmentation
+      // (DefaultSession has neither field), so the result is cast for the
+      // property checks below -- lib/auth.ts's implementation always returns
+      // the full Session shape. Discovered by `next build`'s TypeScript
+      // check, which `vitest run` does not perform.
+      const session = (await authOptions.callbacks!.session!({
         session: { user: {}, expires: "2026-01-01T00:00:00Z" },
         token: { accessToken: "at-1", error: "RefreshAccessTokenError" },
-      } as any);
+      } as any)) as any;
 
       expect(session.accessToken).toBe("at-1");
       expect(session.error).toBe("RefreshAccessTokenError");
@@ -432,8 +438,22 @@ export async function middleware(request: NextRequest) {
   const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
 
   if (!token) {
-    const signInUrl = new URL("/api/auth/signin", request.url);
-    signInUrl.searchParams.set("callbackUrl", request.url);
+    // request.url's origin is not reliable when the app runs behind a remapped
+    // host port (e.g. FRONTEND_PORT=3100 while Next.js listens on 3000 inside
+    // the container): Next.js resolves it from the container's own bind port,
+    // not the incoming Host header, producing a redirect to a port nothing is
+    // listening on. NEXTAUTH_URL is the one env var already correctly wired to
+    // the browser-facing origin (see docker-compose.yml), so the redirect's
+    // origin is built from it; the path/query come from request.nextUrl, which
+    // is unaffected by the host/port issue. Discovered running the real manual
+    // E2E check at Task 8 against a FRONTEND_PORT=3100 override.
+    const baseUrl = process.env.NEXTAUTH_URL ?? request.url;
+    const callbackUrl = new URL(
+      request.nextUrl.pathname + request.nextUrl.search,
+      baseUrl
+    );
+    const signInUrl = new URL("/api/auth/signin", baseUrl);
+    signInUrl.searchParams.set("callbackUrl", callbackUrl.toString());
     return NextResponse.redirect(signInUrl);
   }
 
@@ -486,22 +506,65 @@ npm install --save-dev @testing-library/react @testing-library/jest-dom jsdom
 Replace `frontend/vitest.config.ts` in full:
 
 ```ts
+import path from "node:path";
 import { defineConfig } from "vitest/config";
 
 export default defineConfig({
+  resolve: {
+    // Vite (which Vitest runs on) does not read tsconfig.json's "paths" the
+    // way Next.js's own bundler does -- this alias must be declared here too,
+    // or any test importing a "@/..." module fails to resolve at runtime.
+    // Discovered at Task 6, the first test to import an "@/..." module
+    // (ConversationSidebar.tsx imports "@/lib/api/conversations").
+    alias: {
+      "@": path.resolve(__dirname, "."),
+    },
+  },
   test: {
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
+    // Deterministic test values -- lib/auth.ts reads these at import time, so
+    // tests must not depend on the shell's env or a local .env file being
+    // sourced. Discovered while implementing Task 2: without this, lib/auth.test.ts
+    // only passes when the developer happens to have these exported in their
+    // shell, which `npm test` in a fresh clone or CI would not.
+    env: {
+      KEYCLOAK_ISSUER: "http://localhost:8080/realms/chatgpt-proxy-dev",
+      KEYCLOAK_INTERNAL_URL: "http://keycloak:8080/realms/chatgpt-proxy-dev",
+      KEYCLOAK_CLIENT_ID: "chatgpt-proxy-frontend",
+    },
   },
 });
 ```
+
+**Note:** the `env` block was actually added one task early, during Task 2's
+implementation, because `lib/auth.test.ts` cannot pass reproducibly without
+it; the `resolve.alias` block was added late, during Task 6, for the reason
+noted inline above. If executing this plan fresh, add `env` at Task 2 Step 1
+and `resolve.alias` at Task 6 Step 1 (both before the first test that needs
+them), not here at Task 3 — this step is listed here only because that is
+where the file's other properties (`environment`, `setupFiles`) are
+introduced.
 
 - [ ] **Step 3: Create the test setup file**
 
 `frontend/vitest.setup.ts`:
 
 ```ts
+import { afterEach } from "vitest";
+import { cleanup } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
+
+// Without vitest's `globals: true` (not enabled in this project -- every test
+// file imports explicitly from "vitest"), @testing-library/react's automatic
+// afterEach cleanup cannot find a global `afterEach` to hook into, so renders
+// from earlier tests in the same file stay in jsdom's document.body and leak
+// into later tests' queries. Registering it explicitly here fixes that.
+// Discovered at Task 6: ConversationSidebar.test.tsx's later tests saw
+// duplicate elements from earlier tests' un-cleaned-up renders.
+afterEach(() => {
+  cleanup();
+});
 ```
 
 - [ ] **Step 4: Run the existing test suite to verify nothing broke**
@@ -1967,3 +2030,8 @@ switching `LLM_PROVIDER`/tenant admin.
 - Automated realm-per-tenant provisioning and the privacy debugger panel
   remain open items from the backend chat slice plan and design spec
   respectively — neither is addressed by frontend work.
+- `next build` warns that the `middleware.ts` file convention is deprecated
+  in Next.js 16 in favor of `proxy.ts` (a codemod, `npx @next/codemod@canary
+  middleware-to-proxy .`, is available). Left as `middleware.ts` since it
+  still works and the plan hadn't verified the `proxy` convention's exact
+  export shape — a real follow-up, not a currently-broken path.
