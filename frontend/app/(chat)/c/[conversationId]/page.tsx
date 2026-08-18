@@ -3,9 +3,9 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
-import { getMessages } from "@/lib/api/conversations";
+import { getConversation, getMessages } from "@/lib/api/conversations";
 import { sendMessage, ChatApiError } from "@/lib/api/chat";
-import type { MessageOut } from "@/lib/api/types";
+import type { ConversationDetail, MessageOut } from "@/lib/api/types";
 import { MessageBubble } from "@/components/MessageBubble";
 import { Composer } from "@/components/Composer";
 import styles from "./page.module.css";
@@ -17,6 +17,7 @@ type DisplayItem =
 export default function ConversationPage() {
   const { conversationId } = useParams<{ conversationId: string }>();
   const { data: session } = useSession();
+  const [conversation, setConversation] = useState<ConversationDetail | null>(null);
   const [items, setItems] = useState<DisplayItem[]>([]);
   const [pendingAssistantText, setPendingAssistantText] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
@@ -25,8 +26,12 @@ export default function ConversationPage() {
   function loadMessages() {
     if (!session?.accessToken) return;
     setLoadError(false);
-    getMessages(session.accessToken, conversationId)
-      .then((messages) => {
+    Promise.all([
+      getConversation(session.accessToken, conversationId),
+      getMessages(session.accessToken, conversationId),
+    ])
+      .then(([conversationDetail, messages]) => {
+        setConversation(conversationDetail);
         setItems(messages.map((message) => ({ kind: "message", message })));
       })
       .catch(() => setLoadError(true));
@@ -86,6 +91,8 @@ export default function ConversationPage() {
     }
   }
 
+  const isReadOnly = conversation !== null && !conversation.is_own;
+
   return (
     <>
       <div className={styles.messages}>
@@ -112,7 +119,13 @@ export default function ConversationPage() {
           />
         )}
       </div>
-      <Composer onSend={handleSend} disabled={sending} />
+      {isReadOnly ? (
+        <div className={styles.readOnlyNotice}>
+          Schreibgeschützt — Unterhaltung von {conversation.owner_email}
+        </div>
+      ) : (
+        <Composer onSend={handleSend} disabled={sending} />
+      )}
     </>
   );
 }

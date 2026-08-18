@@ -9,13 +9,19 @@ import {
   listConversations,
 } from "@/lib/api/conversations";
 import type { ConversationSummary } from "@/lib/api/types";
+import { useMe } from "@/components/MeProvider";
 import styles from "./ConversationSidebar.module.css";
 
 export function ConversationSidebar({ activeConversationId }: { activeConversationId?: string }) {
   const { data: session } = useSession();
   const router = useRouter();
+  const me = useMe();
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
   const [loadError, setLoadError] = useState(false);
+  // While `me` is still loading, permission-gated controls stay hidden rather
+  // than briefly flashing enabled -- fails closed on the loading state too.
+  const canCreate = me?.permissions.includes("conversations:create") ?? false;
+  const canDeleteAny = me?.permissions.includes("conversations:delete:any") ?? false;
 
   useEffect(() => {
     // A refresh failure (e.g. the Keycloak refresh token itself expired)
@@ -60,9 +66,11 @@ export function ConversationSidebar({ activeConversationId }: { activeConversati
 
   return (
     <nav className={styles.sidebar}>
-      <button type="button" className={styles.newButton} onClick={handleCreate}>
-        + Neue Anfrage
-      </button>
+      {canCreate && (
+        <button type="button" className={styles.newButton} onClick={handleCreate}>
+          + Neue Anfrage
+        </button>
+      )}
       {loadError && (
         <div className={styles.loadError}>
           <span>Conversations could not be loaded.</span>
@@ -83,6 +91,7 @@ export function ConversationSidebar({ activeConversationId }: { activeConversati
       )}
       {conversations.map((conversation) => {
         const title = conversation.title ?? "Neue Anfrage";
+        const canDelete = conversation.is_own || canDeleteAny;
         return (
           <div
             key={conversation.id}
@@ -94,17 +103,22 @@ export function ConversationSidebar({ activeConversationId }: { activeConversati
             onClick={() => router.push(`/c/${conversation.id}`)}
           >
             <span className={styles.conversationTitle}>{title}</span>
-            <button
-              type="button"
-              aria-label={`Delete ${title}`}
-              className={styles.deleteButton}
-              onClick={(event) => {
-                event.stopPropagation();
-                handleDelete(conversation.id, title);
-              }}
-            >
-              ×
-            </button>
+            {!conversation.is_own && (
+              <span className={styles.ownerBadge}>{conversation.owner_email.split("@")[0]}</span>
+            )}
+            {canDelete && (
+              <button
+                type="button"
+                aria-label={`Delete ${title}`}
+                className={styles.deleteButton}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handleDelete(conversation.id, title);
+                }}
+              >
+                ×
+              </button>
+            )}
           </div>
         );
       })}

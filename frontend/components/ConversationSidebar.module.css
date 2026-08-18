@@ -49,8 +49,20 @@
 }
 
 .conversationTitle {
+  flex: 1;
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ownerBadge {
+  flex-shrink: 0;
+  background: var(--color-accent-subtle);
+  color: var(--color-text-muted);
+  border-radius: var(--radius-sm);
+  padding: 2px 6px;
+  font-size: 11px;
   white-space: nowrap;
 }
 

@@ -8,8 +8,13 @@ from __future__ import annotations
 
 import uuid
 from enum import StrEnum
+from typing import TYPE_CHECKING, Literal
 
 from sqlalchemy.orm import Session
+
+if TYPE_CHECKING:
+    from app.auth.tenant_resolver import AuthenticatedUser
+    from app.models import User
 
 ROLE_SUPER_ADMIN = "super_admin"
 ROLE_DOCTOR = "doctor"
@@ -70,3 +75,35 @@ def resolve_permissions(
         else:
             effective.discard(permission)
     return frozenset(effective)
+
+
+VisibilityScope = Literal["own", "branch", "tenant"]
+
+
+def visibility_scope(user: AuthenticatedUser) -> VisibilityScope:
+    """The widest conversation-listing scope this user's permissions allow.
+
+    Own-conversation visibility always applies underneath this (see module
+    docstring) -- this only decides how much of the *rest* of the tenant a
+    user's list/read additionally covers.
+    """
+    if Permission.CONVERSATIONS_READ_ALL in user.permissions:
+        return "tenant"
+    if Permission.CONVERSATIONS_READ_BRANCH in user.permissions:
+        return "branch"
+    return "own"
+
+
+def can_read_conversation(user: AuthenticatedUser, owner: User) -> bool:
+    if owner.id == user.user_id:
+        return True
+    scope = visibility_scope(user)
+    if scope == "tenant":
+        return True
+    if scope == "branch":
+        # NULL-branch praxis: every user's branch_id is None, and `None == None`
+        # is True in Python, so a branch grant there correctly degenerates to
+        # praxis-wide visibility -- the intuitively correct behavior for a
+        # single-location praxis with no branches configured at all.
+        return owner.branch_id == user.branch_id
+    return False

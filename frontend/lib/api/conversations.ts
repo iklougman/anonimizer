@@ -1,4 +1,4 @@
-import type { ConversationSummary, MessageOut } from "./types";
+import type { ConversationDetail, ConversationSummary, MessageOut } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -27,6 +27,17 @@ export async function deleteConversation(accessToken: string, conversationId: st
   if (!response.ok && response.status !== 204) {
     throw new Error(`failed to delete conversation: ${response.status}`);
   }
+}
+
+export async function getConversation(
+  accessToken: string,
+  conversationId: string
+): Promise<ConversationDetail> {
+  const response = await fetch(`${API_BASE_URL}/api/conversations/${conversationId}`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new Error(`failed to load conversation: ${response.status}`);
+  return response.json();
 }
 
 export async function getMessages(accessToken: string, conversationId: string): Promise<MessageOut[]> {

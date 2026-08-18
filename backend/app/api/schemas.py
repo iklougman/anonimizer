@@ -11,6 +11,13 @@ class ConversationSummary(BaseModel):
     title: str | None
     created_at: datetime
     updated_at: datetime
+    owner_user_id: uuid.UUID
+    owner_email: str
+    is_own: bool
+
+
+class ConversationDetail(ConversationSummary):
+    pass
 
 
 class MessageOut(BaseModel):
