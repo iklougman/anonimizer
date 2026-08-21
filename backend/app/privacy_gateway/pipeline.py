@@ -13,6 +13,7 @@ from app.privacy_gateway.detectors.stack import DetectorStack
 from app.privacy_gateway.output_guard.guard import (
     LeakageDetectedError,
     OutputGuard,
+    ResidualPIIError,
     UnresolvedTokenError,
 )
 from app.privacy_gateway.pseudonymization.pseudonymizer import Pseudonymizer
@@ -33,6 +34,7 @@ __all__ = [
     "LeakageDetectedError",
     "LowConfidenceSpanError",
     "Pipeline",
+    "ResidualPIIError",
     "UnresolvedTokenError",
     "deanonymize",
     "get_pipeline",
@@ -49,11 +51,20 @@ class Pipeline:
         risk_scorer: RiskScorer,
         pseudonymizer: Pseudonymizer,
         output_guard: OutputGuard,
+        guard_enabled: bool = True,
     ) -> None:
         self._detector_stack = detector_stack
         self._risk_scorer = risk_scorer
         self._pseudonymizer = pseudonymizer
         self._output_guard = output_guard
+        self._guard_enabled = guard_enabled
+        if not guard_enabled:
+            logger.warning(
+                "pipeline.init output_guard DISABLED via OUTPUT_GUARD_ENABLED=false: "
+                "deanonymize will return raw LLM completions with the post-LLM leakage "
+                "scan bypassed. This is a debug override and must not be used outside "
+                "development -- it may return PII the model hallucinated."
+            )
 
     def sanitize(
         self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, text: str
@@ -96,6 +107,21 @@ class Pipeline:
         result = self._pseudonymizer.apply(
             tenant_id, conversation_id, text, assessment.tokenize
         )
+
+        # Pre-send check: verify sanitize()'s own output before it ever reaches an
+        # LLM, using the identical mask-then-rescan step the output guard runs on
+        # LLM replies. This catches a pseudonymization bug (a detected span that
+        # didn't get substituted), not a detector blind spot -- an entity layer 1-3
+        # never recognized here was equally invisible to the scan two lines above.
+        try:
+            self._output_guard.assert_no_raw_pii(result)
+        except ResidualPIIError as exc:
+            logger.warning(
+                "sanitize.residual_pii tenant_id=%s conversation_id=%s reason=%s: %s",
+                tenant_id, conversation_id, type(exc).__name__, exc,
+            )
+            raise
+
         logger.info(
             "sanitize.pseudonymize tenant_id=%s conversation_id=%s tokens_issued=%d -> PASS",
             tenant_id, conversation_id, len(assessment.tokenize),
@@ -105,10 +131,33 @@ class Pipeline:
     def deanonymize(
         self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, llm_output: str
     ) -> str:
-        """Design spec §5: leakage scan, then authorization-checked token resolution."""
+        """Design spec §5: leakage scan, then authorization-checked token resolution.
+
+        When OUTPUT_GUARD_ENABLED=false (debug only), the leakage scan is bypassed
+        via OutputGuard.restore_unchecked so the raw LLM completion (tokens
+        resolved, no leakage re-scan) is returned for inspection.
+        UnresolvedTokenError still raises -- that is a correctness failure, not a
+        privacy gate.
+        """
         try:
-            result = self._output_guard.restore(tenant_id, conversation_id, llm_output)
-        except (LeakageDetectedError, UnresolvedTokenError) as exc:
+            if self._guard_enabled:
+                result = self._output_guard.restore(tenant_id, conversation_id, llm_output)
+            else:
+                logger.warning(
+                    "deanonymize.UNGUARDED tenant_id=%s conversation_id=%s "
+                    "output_guard disabled by config; raw LLM output returned",
+                    tenant_id, conversation_id,
+                )
+                result = self._output_guard.restore_unchecked(
+                    tenant_id, conversation_id, llm_output
+                )
+        except UnresolvedTokenError as exc:
+            logger.warning(
+                "deanonymize.reject tenant_id=%s conversation_id=%s reason=%s: %s",
+                tenant_id, conversation_id, type(exc).__name__, exc,
+            )
+            raise
+        except LeakageDetectedError as exc:
             logger.warning(
                 "deanonymize.reject tenant_id=%s conversation_id=%s reason=%s: %s",
                 tenant_id, conversation_id, type(exc).__name__, exc,
@@ -138,6 +187,7 @@ def get_pipeline() -> Pipeline:
         risk_scorer=RiskScorer(get_rare_disease_names()),
         pseudonymizer=Pseudonymizer(vault),
         output_guard=OutputGuard(detector_stack, vault),
+        guard_enabled=get_settings().output_guard_enabled,
     )
 
 

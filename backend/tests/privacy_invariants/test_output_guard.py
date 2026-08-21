@@ -15,6 +15,7 @@ from app.privacy_gateway.output_guard.guard import (
     TOKEN_PATTERN,
     LeakageDetectedError,
     OutputGuard,
+    ResidualPIIError,
     UnresolvedTokenError,
 )
 from app.privacy_gateway.token_vault.key_provider import FileSecretKeyProvider
@@ -254,3 +255,55 @@ def test_output_with_no_tokens_and_no_pii_passes_through(scope, guard):
     tenant_id, conversation_id = scope
     text = "Die Befunde sind unauffällig und es sind keine weiteren Schritte nötig."
     assert guard.restore(tenant_id, conversation_id, text) == text
+
+
+def test_assert_no_raw_pii_passes_a_fully_tokenized_string(scope, guard, key_provider):
+    tenant_id, conversation_id = scope
+    token = TokenVault(key_provider).create_mapping(
+        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
+    )
+    guard.assert_no_raw_pii(f"Patient {token} wurde aufgenommen.")
+
+
+def test_assert_no_raw_pii_raises_on_untokenized_pii(guard):
+    with pytest.raises(ResidualPIIError, match="INSURANCE_NUMBER"):
+        guard.assert_no_raw_pii("Die Versichertennummer lautet A123456789.")
+
+
+# --- restore_unchecked (OUTPUT_GUARD_ENABLED=false debug path) -----------------
+# These pin the debug-only bypass: the leakage scan is skipped (so a leaky LLM
+# reply is returned rather than rejected), but UnresolvedTokenError still
+# raises because an unresolved token is a correctness failure, not a privacy
+# gate. See OutputGuard.restore_unchecked and Pipeline.deanonymize.
+
+
+def test_restore_unchecked_returns_output_that_restore_would_reject(scope, guard):
+    """The debug path's purpose: let an operator see what the LLM actually
+    produced. A reply containing a real insurance number would be rejected by
+    restore() with LeakageDetectedError; restore_unchecked() returns it
+    verbatim instead."""
+    tenant_id, conversation_id = scope
+    leaky = "Die Versichertennummer lautet A123456789."
+    with pytest.raises(LeakageDetectedError):
+        guard.restore(tenant_id, conversation_id, leaky)
+    assert guard.restore_unchecked(tenant_id, conversation_id, leaky) == leaky
+
+
+def test_restore_unchecked_still_resolves_legitimate_tokens(scope, guard, key_provider):
+    tenant_id, conversation_id = scope
+    token = TokenVault(key_provider).create_mapping(
+        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
+    )
+    assert guard.restore_unchecked(
+        tenant_id, conversation_id, f"Die Behandlung von {token} verlief gut."
+    ) == "Die Behandlung von Lukas Berger verlief gut."
+
+
+def test_restore_unchecked_still_raises_on_unresolved_token(scope, guard):
+    """Correctness failures (fabricated / foreign tokens) are not bypassed by
+    the debug flag -- only the leakage scan is."""
+    tenant_id, conversation_id = scope
+    with pytest.raises(UnresolvedTokenError, match="PATIENT_0000000000"):
+        guard.restore_unchecked(
+            tenant_id, conversation_id, "Der Wert von PATIENT_0000000000 ist unklar."
+        )

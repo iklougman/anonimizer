@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 
+from app.privacy_gateway.detectors.base import Span
 from app.privacy_gateway.detectors.stack import DetectorStack
 from app.privacy_gateway.token_vault.vault import TokenVault
 
@@ -18,7 +19,33 @@ class LeakageDetectedError(Exception):
     Design spec §5 step 1: fail-closed — raise, do not return partial output. No
     audit_events row is written here; audit_events repository access is out of scope
     per the data-model plan, so this typed exception is what the caller logs.
+
+    Carries `entity_types` (one per leaked span, in detection order) rather than
+    just the string message, so a caller building an audit trail can record what
+    kind of PII leaked without re-parsing the message text.
     """
+
+    def __init__(self, message: str, entity_types: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.entity_types = entity_types or []
+
+
+class ResidualPIIError(Exception):
+    """A just-pseudonymized string still contains PII outside its own tokens.
+
+    Runs before the text is ever sent to an LLM (Pipeline.sanitize, after
+    Pseudonymizer.apply), so unlike LeakageDetectedError this cannot be the LLM
+    inventing or leaking anything -- it means sanitize()'s own detect-then-substitute
+    step missed or mis-substituted a span. It is a check on this pipeline's own
+    output, not a compensation for detector recall: an entity the first detector
+    pass never recognized is invisible to this identical second pass too.
+
+    Carries `entity_types` for the same reason LeakageDetectedError does.
+    """
+
+    def __init__(self, message: str, entity_types: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.entity_types = entity_types or []
 
 
 class UnresolvedTokenError(Exception):
@@ -28,7 +55,14 @@ class UnresolvedTokenError(Exception):
     Design spec §5 step 4: a token the LLM could not have legitimately produced —
     another tenant's, another conversation's, or fabricated by prompt injection.
     Raise rather than returning it opaque or silently dropping it.
+
+    Carries `tokens` (the unresolved token strings) for the same reason
+    `LeakageDetectedError` carries `entity_types`.
     """
+
+    def __init__(self, message: str, tokens: list[str] | None = None) -> None:
+        super().__init__(message)
+        self.tokens = tokens or []
 
 
 class OutputGuard:
@@ -39,25 +73,47 @@ class OutputGuard:
     def restore(
         self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, llm_output: str
     ) -> str:
-        token_bounds = [
-            (match.start(), match.end()) for match in TOKEN_PATTERN.finditer(llm_output)
-        ]
+        token_bounds = _token_bounds(llm_output)
 
         # Step 1: re-run the full detector stack over the output with every token
         # masked out; anything still detected is raw-looking PII the LLM produced or
         # leaked. Masking (rather than detecting on the raw output and then asking
         # whether each span sits inside a token) is what makes this check stable —
         # see _mask_tokens.
-        leaked = self._detector_stack.detect(_mask_tokens(llm_output, token_bounds))
+        leaked = self._scan(llm_output, token_bounds)
         if leaked:
             raise LeakageDetectedError(
                 "raw-looking PII in LLM output: "
                 + ", ".join(
                     f"{span.entity_type} at [{span.start}:{span.end}]" for span in leaked
                 )
-                + "; the response is rejected rather than partially returned"
+                + "; the response is rejected rather than partially returned",
+                entity_types=[span.entity_type for span in leaked],
             )
 
+        return self._resolve(tenant_id, conversation_id, llm_output, token_bounds)
+
+    def restore_unchecked(
+        self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, llm_output: str
+    ) -> str:
+        """Debug path (OUTPUT_GUARD_ENABLED=false): skip the leakage scan but still
+        resolve tokens and still fail on unresolved ones. Returns the LLM's raw
+        completion with tokens substituted back -- including any real-looking PII
+        the model may have hallucinated -- so an operator can inspect what the model
+        actually produced. Steps 2-4 of restore() run unchanged; only step 1 is
+        bypassed.
+        """
+        return self._resolve(
+            tenant_id, conversation_id, llm_output, _token_bounds(llm_output)
+        )
+
+    def _resolve(
+        self,
+        tenant_id: uuid.UUID,
+        conversation_id: uuid.UUID,
+        llm_output: str,
+        token_bounds: list[tuple[int, int]],
+    ) -> str:
         # Steps 2 and 3: extract the token-shaped substrings and let TokenVault apply
         # the (tenant_id, conversation_id) authorization scope.
         tokens = [llm_output[start:end] for start, end in token_bounds]
@@ -69,13 +125,40 @@ class OutputGuard:
             raise UnresolvedTokenError(
                 "token(s) not issued for this tenant and conversation: "
                 + ", ".join(unresolved)
-                + "; the response is rejected rather than returned opaque"
+                + "; the response is rejected rather than returned opaque",
+                tokens=unresolved,
             )
 
         restored = llm_output
         for start, end in reversed(token_bounds):
             restored = restored[:start] + resolved[llm_output[start:end]] + restored[end:]
         return restored
+
+    def assert_no_raw_pii(self, text: str) -> None:
+        """Pre-send check: run the identical mask-then-rescan step `restore()` runs
+        on LLM output against a just-pseudonymized string instead, before it ever
+        leaves the network boundary. Raises ResidualPIIError, not
+        LeakageDetectedError -- this text was produced by Pseudonymizer.apply(), not
+        an LLM, so a hit here means the pipeline's own substitution missed a span.
+        """
+        token_bounds = _token_bounds(text)
+        leaked = self._scan(text, token_bounds)
+        if leaked:
+            raise ResidualPIIError(
+                "raw PII surviving pseudonymization: "
+                + ", ".join(
+                    f"{span.entity_type} at [{span.start}:{span.end}]" for span in leaked
+                )
+                + "; the message is rejected rather than sent to the LLM unverified",
+                entity_types=[span.entity_type for span in leaked],
+            )
+
+    def _scan(self, text: str, token_bounds: list[tuple[int, int]]) -> list[Span]:
+        return self._detector_stack.detect(_mask_tokens(text, token_bounds))
+
+
+def _token_bounds(text: str) -> list[tuple[int, int]]:
+    return [(match.start(), match.end()) for match in TOKEN_PATTERN.finditer(text)]
 
 
 MASK_CHARACTER = "#"

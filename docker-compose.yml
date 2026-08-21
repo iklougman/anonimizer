@@ -58,6 +58,7 @@ services:
       OLLAMA_MODEL: ${OLLAMA_MODEL:-llama3.1}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+      OUTPUT_GUARD_ENABLED: ${OUTPUT_GUARD_ENABLED:-true}
     secrets:
       - master_key
     ports:

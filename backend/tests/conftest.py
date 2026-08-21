@@ -6,6 +6,7 @@ import pytest
 import sqlalchemy as sa
 
 os.environ["ENVIRONMENT"] = "test"
+os.environ["OUTPUT_GUARD_ENABLED"] = "true"
 os.environ.setdefault(
     "DATABASE_URL",
     "postgresql+psycopg://chatgpt_proxy:change-me@localhost:5432/chatgpt_proxy",

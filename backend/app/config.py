@@ -51,7 +51,16 @@ class Settings(BaseSettings):
     ollama_base_url: str = "http://ollama:11434"
     ollama_model: str = "llama3.1"
     openai_api_key: str | None = None
-    openai_model: str = "gpt-4o-mini"
+    openai_model: str = "gpt-5-nano"
+
+    # Debug-only override (ADR-0020): when false, the deanonymize step skips the
+    # post-LLM leakage scan and returns the LLM's raw completion (with tokens
+    # still resolved) so an operator can inspect what the model actually
+    # produced. The outbound sanitize step and assert_no_raw_pii are
+    # unaffected -- only the response guard is bypassed. Must remain true in
+    # any non-dev environment: a false value returns unverified text that may
+    # contain real PII the LLM hallucinated.
+    output_guard_enabled: bool = True
 
     @model_validator(mode="after")
     def _require_openai_key_when_selected(self) -> "Settings":

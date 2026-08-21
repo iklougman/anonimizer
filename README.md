@@ -144,6 +144,21 @@ Switch to OpenAI by setting `LLM_PROVIDER=openai` and `OPENAI_API_KEY` in
 concrete check for ADR-0022's "the external provider never sees the identity
 mapping" claim against a real network call.
 
+### `OUTPUT_GUARD_ENABLED` (debug only)
+
+`OUTPUT_GUARD_ENABLED=false` bypasses the post-LLM leakage scan in
+`deanonymize()` and returns the model's raw completion (tokens still resolved,
+no re-scan) so an operator can inspect exactly what the LLM produced — e.g. to
+diagnose a `LeakageDetectedError` caused by the model hallucinating real names
+instead of reproducing tokens. The outbound `sanitize()` step and its
+`assert_no_raw_pii` pre-send check are unaffected; only the response guard is
+skipped. `UnresolvedTokenError` still raises (a correctness failure, not a
+privacy gate).
+
+This is a debug override. It may return PII the model hallucinated, so it
+**must not be used outside development**. Restart the backend after changing
+it (the pipeline is a process-wide singleton read once at startup).
+
 ## Frontend tests
 
 ```bash
