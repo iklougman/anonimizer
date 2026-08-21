@@ -4,13 +4,18 @@ import decimal
 
 import httpx
 
-from app.llm_gateway.provider import LLMCompletion, LLMProviderError
+from app.llm_gateway.provider import (
+    ChatMessage,
+    LLMCompletion,
+    LLMProviderError,
+)
 
 # Per-1K-token USD pricing, for the research benchmark's cost metric (master design
 # doc §8) only -- not billing-accurate, and not kept in sync with OpenAI's price
 # changes automatically. Unknown models cost 0 rather than raising, so a model
 # rename never blocks a chat response over a pricing lookup.
 _PRICING_PER_1K_TOKENS: dict[str, tuple[decimal.Decimal, decimal.Decimal]] = {
+    "gpt-5-nano": (decimal.Decimal("0.00005"), decimal.Decimal("0.0004")),
     "gpt-4o-mini": (decimal.Decimal("0.00015"), decimal.Decimal("0.0006")),
     "gpt-4o": (decimal.Decimal("0.0025"), decimal.Decimal("0.01")),
 }
@@ -35,14 +40,29 @@ class OpenAIProvider:
         self._api_key = api_key
         self._http_client = http_client if http_client is not None else httpx.Client(timeout=120.0)
 
-    def complete(self, prompt: str) -> LLMCompletion:
+    def complete(self, messages: list[ChatMessage]) -> LLMCompletion:
         try:
+            # No "temperature" override here: some models (e.g. gpt-5-nano) reject
+            # any value other than their default (1) with a 400, and there is no
+            # single value that works across OpenAI's whole model lineup. The
+            # leading system message (TOKEN_PRESERVATION_SYSTEM_PROMPT, prepended
+            # by the orchestrator) is the portable lever; temperature is only
+            # applied where a provider is known to support it (see OllamaProvider).
             response = self._http_client.post(
                 f"{self._base_url}/chat/completions",
-                json={"model": self.model, "messages": [{"role": "user", "content": prompt}]},
+                json={
+                    "model": self.model,
+                    "messages": [
+                        {"role": m.role, "content": m.content} for m in messages
+                    ],
+                },
                 headers={"Authorization": f"Bearer {self._api_key}"},
             )
             response.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise OpenAIProviderError(
+                f"openai request failed: {exc}; response body: {exc.response.text}"
+            ) from exc
         except httpx.HTTPError as exc:
             raise OpenAIProviderError(f"openai request failed: {exc}") from exc
 

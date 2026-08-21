@@ -14,7 +14,7 @@ from app.db.repositories.conversation_repository import ConversationRepository
 from app.db.repositories.tenant_repository import TenantRepository
 from app.db.repositories.user_repository import UserRepository
 from app.db.session import SessionLocal, tenant_scoped_session
-from app.llm_gateway.provider import LLMCompletion, LLMProviderError
+from app.llm_gateway.provider import ChatMessage, LLMCompletion, LLMProviderError
 from app.llm_gateway.registry import get_provider
 from app.main import app
 from app.models import LLMRequest, Message
@@ -38,10 +38,12 @@ class _StubProvider:
     def __init__(self, response_text: str | None = None, error: Exception | None = None):
         self._response_text = response_text
         self._error = error
+        self.captured_messages: list[list[ChatMessage]] = []
 
-    def complete(self, prompt: str) -> LLMCompletion:
+    def complete(self, messages: list[ChatMessage]) -> LLMCompletion:
         if self._error is not None:
             raise self._error
+        self.captured_messages.append(list(messages))
         return LLMCompletion(
             text=self._response_text, tokens_in=10, tokens_out=10, cost_usd=decimal.Decimal("0")
         )
@@ -204,6 +206,7 @@ def test_leaked_response_is_a_500_and_is_audit_logged(scope, authenticated):
         ).scalars().all()
         assert len(events) == 1
         assert events[0].event_type == "LeakageDetectedError"
+        assert events[0].entity_type == "PATIENT"
 
     _clear_provider_override()
 
@@ -214,3 +217,39 @@ def test_send_message_to_unknown_conversation_is_404(authenticated):
         f"/api/conversations/{uuid.uuid4()}/messages", json={"content": "Hallo."}
     )
     assert response.status_code == 404
+
+
+def test_second_send_includes_the_first_turn_in_the_provider_messages(scope, authenticated):
+    """The chat flow loads prior sanitized messages and sends them as history to
+    the provider, so the model has memory of earlier turns (spec §6 step 3)."""
+    tenant_id, _, conversation_id = scope
+    stub = _StubProvider(response_text="Antwort.")
+    _use_provider(stub)
+    client = TestClient(app)
+
+    client.post(
+        f"/api/conversations/{conversation_id}/messages", json={"content": "erste Frage."}
+    )
+    second = client.post(
+        f"/api/conversations/{conversation_id}/messages", json={"content": "zweite Frage."}
+    )
+
+    assert second.status_code == 200
+    # Two calls, each with [system, ...history, user].
+    assert len(stub.captured_messages) == 2
+    first_call = stub.captured_messages[0]
+    second_call = stub.captured_messages[1]
+    # First call: system + one user message, no history.
+    assert len(first_call) == 2
+    assert first_call[0].role == "system"
+    assert first_call[1].role == "user"
+    # Second call: system + first turn (user) + first turn (assistant) + new user.
+    assert len(second_call) == 4
+    assert second_call[0].role == "system"
+    assert second_call[1].role == "user"
+    assert second_call[2].role == "assistant"
+    assert second_call[3].role == "user"
+    # The persisted assistant reply is the stub's fixed response text.
+    assert second_call[2].content == "Antwort."
+
+    _clear_provider_override()
