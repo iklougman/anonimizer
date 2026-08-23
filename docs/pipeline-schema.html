@@ -1,0 +1,374 @@
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&display=swap">
+<title>Privacy Pipeline Schema</title>
+<style>
+  :root {
+    --paper: #f4f6f4;
+    --ink: #14201c;
+    --muted: #5b6b66;
+    --rule: #c9d1cc;
+    --surface: #ffffff;
+    --surface2: #ffffff;
+    --accent: #0e8f93;       /* pseudonymized text crossing the boundary */
+    --accent-soft: #d6efee;
+    --danger: #a83c33;       /* fail-closed off-ramps */
+    --danger-soft: #f4e0dd;
+    --store: #3e4a52;        /* data stores */
+    --store-soft: #e3e7ea;
+    --maxw: 980px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #0d1412;
+      --ink: #e6ece9;
+      --muted: #93a39e;
+      --rule: #2c3833;
+      --surface: #111a17;
+      --surface2: #14201d;
+      --accent: #34c3c7;
+      --accent-soft: #12302f;
+      --danger: #db6256;
+      --danger-soft: #2c1715;
+      --store: #8b97a0;
+      --store-soft: #1a242a;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #0d1412;
+    --ink: #e6ece9;
+    --muted: #93a39e;
+    --rule: #2c3833;
+    --surface: #111a17;
+    --surface2: #14201d;
+    --accent: #34c3c7;
+    --accent-soft: #12302f;
+    --danger: #db6256;
+    --danger-soft: #2c1715;
+    --store: #8b97a0;
+    --store-soft: #1a242a;
+  }
+
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body {
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    line-height: 1.55;
+    padding: 48px 24px 72px;
+  }
+  .wrap { max-width: var(--maxw); margin: 0 auto; }
+
+  header { margin-bottom: 28px; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 10px;
+  }
+  h1 {
+    font-size: 30px; line-height: 1.15; font-weight: 700;
+    margin: 0 0 12px; text-wrap: balance; letter-spacing: -0.01em;
+  }
+  .lede { color: var(--muted); max-width: 62ch; margin: 0; font-size: 15.5px; }
+
+  figure {
+    margin: 0;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    padding: 20px 16px 8px;
+  }
+  svg { display: block; width: 100%; max-width: 100%; height: auto; color: var(--ink); }
+  figcaption {
+    font-family: "IBM Plex Sans", sans-serif;
+    font-size: 13.5px; color: var(--muted);
+    padding: 14px 6px 4px; margin: 0;
+    max-width: 80ch;
+  }
+
+  .legend {
+    display: flex; flex-wrap: wrap; gap: 18px 26px;
+    margin: 22px 2px 0;
+    font-family: "IBM Plex Mono", monospace; font-size: 12px; color: var(--muted);
+  }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+  .swatch { width: 22px; height: 0; border-top: 2px solid currentColor; flex: none; }
+  .sw-acc { color: var(--accent); }
+  .sw-plain { color: var(--ink); }
+  .sw-dash { border-top-style: dashed; }
+  .sw-danger { color: var(--danger); }
+  .sw-store { color: var(--store); }
+
+  .notes {
+    margin: 40px 2px 0;
+    display: grid; grid-template-columns: 1fr; gap: 14px;
+  }
+  .note {
+    border: 1px solid var(--rule); border-radius: 6px;
+    padding: 14px 16px; background: var(--surface);
+  }
+  .note h2 {
+    font-family: "IBM Plex Mono", monospace; font-size: 12px;
+    letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted);
+    margin: 0 0 8px; font-weight: 600;
+  }
+  .note p { margin: 0; font-size: 14px; }
+  .note code {
+    font-family: "IBM Plex Mono", monospace; font-size: 12.5px;
+    background: var(--surface2); border: 1px solid var(--rule);
+    padding: 1px 5px; border-radius: 3px; color: var(--ink);
+  }
+  @media (min-width: 720px) {
+    .notes { grid-template-columns: 1fr 1fr; }
+  }
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">chatgpt-proxy · backend</p>
+    <h1>Privacy Pipeline Schema</h1>
+    <p class="lede">The path a message takes from the chat API through detection, risk scoring, and pseudonymization, across the network boundary to the LLM, and back through leakage scanning and token restoration. Pseudonymized text is the only payload that crosses the boundary; every failure is fail-closed.</p>
+  </header>
+
+  <figure>
+    <svg viewBox="0 0 960 1220" role="img" aria-label="Privacy pipeline flow: a user message is sanitized through detector stack, risk scorer, pseudonymizer, and a pre-send residual-PII check, then persisted; only pseudonymized text crosses the boundary to the OpenAI provider, whose completion is leakage-scanned, token-resolved, and deanonymized before being persisted and streamed back. Fail-closed off-ramps return 422, 502, or 500.">
+      <defs>
+        <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="currentColor"/>
+        </marker>
+        <marker id="arrowAcc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--accent)"/>
+        </marker>
+        <marker id="arrowDanger" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--danger)"/>
+        </marker>
+        <marker id="arrowStore" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+          <path d="M0,0 L10,5 L0,10 z" fill="var(--store)"/>
+        </marker>
+      </defs>
+
+      <!-- ===== SPINE: process nodes (x 320..640, center 480) ===== -->
+      <!-- n1 Client -->
+      <g>
+        <rect x="320" y="30" width="320" height="48" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="54" text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Mono, monospace" font-size="13" fill="currentColor">Client · POST /api/conversations/{id}/messages</text>
+      </g>
+      <!-- n2 Chat API -->
+      <g>
+        <rect x="320" y="114" width="320" height="48" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="138" text-anchor="middle" dominant-baseline="central" font-family="IBM Plex Mono, monospace" font-size="13" fill="currentColor">Chat API · receive (chat.py)</text>
+      </g>
+
+      <!-- SANITIZE eyebrow -->
+      <text x="320" y="184" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)" letter-spacing="1.5">SANITIZE — pipeline.sanitize()</text>
+      <line x1="320" y1="190" x2="640" y2="190" stroke="var(--rule)" stroke-width="1"/>
+
+      <!-- n3 DetectorStack -->
+      <g>
+        <rect x="320" y="200" width="320" height="48" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="216" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">DetectorStack.detect()</text>
+        <text x="480" y="234" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">regex · presidio (de_core_news_lg) · hospital names</text>
+      </g>
+      <!-- n4 RiskScorer -->
+      <g>
+        <rect x="320" y="280" width="320" height="48" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="296" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">RiskScorer.score()</text>
+        <text x="480" y="314" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">quasi-identifiers · rare diseases → tokens to issue</text>
+      </g>
+      <!-- n5 Pseudonymizer -->
+      <g>
+        <rect x="320" y="360" width="320" height="48" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="376" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">Pseudonymizer.apply()</text>
+        <text x="480" y="394" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">substitute spans → TYPE_XXXXXXXXXX tokens</text>
+      </g>
+      <!-- n6 assert_no_raw_pii -->
+      <g>
+        <rect x="320" y="440" width="320" height="48" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="456" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">OutputGuard.assert_no_raw_pii()</text>
+        <text x="480" y="474" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">mask tokens, re-scan — pre-send self-check</text>
+      </g>
+      <!-- n7 Persist user message -->
+      <g>
+        <rect x="320" y="520" width="320" height="48" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="536" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">Persist user message</text>
+        <text x="480" y="554" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">sanitized_content + title · commit</text>
+      </g>
+
+      <!-- ===== BOUNDARY (brackets the external LLM only) ===== -->
+      <line x1="296" y1="600" x2="664" y2="600" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="6 5"/>
+      <text x="664" y="594" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--accent)" letter-spacing="0.5">privacy / network boundary</text>
+
+      <!-- n8 LLM provider (external) -->
+      <g>
+        <rect x="300" y="624" width="360" height="60" rx="3" fill="var(--accent-soft)" stroke="var(--accent)" stroke-width="1.25"/>
+        <text x="480" y="644" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="var(--ink)">LLMProvider.complete()</text>
+        <text x="480" y="662" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11.5" fill="currentColor">OpenAI · /chat/completions · gpt-5-nano</text>
+        <text x="480" y="676" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--muted)">system prompt + pseudonymized text only</text>
+      </g>
+
+      <line x1="296" y1="708" x2="664" y2="708" stroke="var(--accent)" stroke-width="1.5" stroke-dasharray="6 5"/>
+      <text x="664" y="724" text-anchor="end" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--accent)" letter-spacing="0.5">pseudonymized text is the only thing that crosses</text>
+
+      <!-- DEANONYMIZE eyebrow -->
+      <text x="320" y="752" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)" letter-spacing="1.5">DEANONYMIZE — pipeline.deanonymize() / OutputGuard.restore()</text>
+      <line x1="320" y1="758" x2="640" y2="758" stroke="var(--rule)" stroke-width="1"/>
+
+      <!-- n9 Leakage scan -->
+      <g>
+        <rect x="320" y="768" width="320" height="48" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="784" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">Leakage scan · mask tokens, re-scan</text>
+        <text x="480" y="802" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">raw-looking PII in output → reject</text>
+      </g>
+      <!-- n10 resolve_tokens -->
+      <g>
+        <rect x="320" y="848" width="320" height="48" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="864" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">TokenVault.resolve_tokens()</text>
+        <text x="480" y="882" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">scope: (tenant_id, conversation_id)</text>
+      </g>
+      <!-- n11 Replace tokens -->
+      <g>
+        <rect x="320" y="928" width="320" height="48" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="944" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">Replace tokens with plaintext</text>
+        <text x="480" y="962" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">→ human-readable response</text>
+      </g>
+      <!-- n12 Persist assistant + LLMRequest -->
+      <g>
+        <rect x="320" y="1008" width="320" height="60" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="1028" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">Persist assistant message + LLMRequest</text>
+        <text x="480" y="1046" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">raw completion as sanitized_content</text>
+        <text x="480" y="1060" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--muted)">tokens_in/out · cost_usd · latency · commit</text>
+      </g>
+      <!-- n13 SSE replay -->
+      <g>
+        <rect x="320" y="1100" width="320" height="48" rx="3" fill="var(--surface2)" stroke="currentColor" stroke-width="1"/>
+        <text x="480" y="1116" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="currentColor">SSE replay → Client</text>
+        <text x="480" y="1134" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" fill="var(--muted)">human-readable text, token-chunked</text>
+      </g>
+
+      <!-- ===== SPINE ARROWS (inside, plain) ===== -->
+      <g stroke="currentColor" stroke-width="1.25" fill="none">
+        <line x1="480" y1="78"  x2="480" y2="110" marker-end="url(#arrow)"/>
+        <line x1="480" y1="162" x2="480" y2="196" marker-end="url(#arrow)"/>
+        <line x1="480" y1="248" x2="480" y2="276" marker-end="url(#arrow)"/>
+        <line x1="480" y1="328" x2="480" y2="356" marker-end="url(#arrow)"/>
+        <line x1="480" y1="408" x2="480" y2="436" marker-end="url(#arrow)"/>
+        <line x1="480" y1="488" x2="480" y2="516" marker-end="url(#arrow)"/>
+      </g>
+      <!-- boundary-crossing arrows (accent): into LLM, out of LLM -->
+      <g stroke="var(--accent)" stroke-width="1.5" fill="none">
+        <line x1="480" y1="568" x2="480" y2="620" marker-end="url(#arrowAcc)"/>
+        <line x1="480" y1="684" x2="480" y2="764" marker-end="url(#arrowAcc)"/>
+      </g>
+      <text x="492" y="600" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)">pseudonymized</text>
+      <text x="492" y="730" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--accent)">pseudonymized</text>
+
+      <!-- post-boundary spine arrows -->
+      <g stroke="currentColor" stroke-width="1.25" fill="none">
+        <line x1="480" y1="816" x2="480" y2="844" marker-end="url(#arrow)"/>
+        <line x1="480" y1="896" x2="480" y2="924" marker-end="url(#arrow)"/>
+        <line x1="480" y1="976" x2="480" y2="1004" marker-end="url(#arrow)"/>
+        <line x1="480" y1="1068" x2="480" y2="1096" marker-end="url(#arrow)"/>
+        <line x1="480" y1="1148" x2="480" y2="1178" marker-end="url(#arrow)"/>
+      </g>
+
+      <!-- ===== LEFT: data stores ===== -->
+      <!-- TokenVault -->
+      <g>
+        <rect x="32" y="356" width="200" height="56" rx="3" fill="var(--store-soft)" stroke="var(--store)" stroke-width="1"/>
+        <text x="132" y="376" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="var(--store)">TokenVault</text>
+        <text x="132" y="394" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--muted)">encrypted token↔PII map</text>
+      </g>
+      <g stroke="var(--store)" stroke-width="1" fill="none" stroke-dasharray="4 3">
+        <!-- vault -> pseudonymizer (issue) -->
+        <line x1="232" y1="378" x2="316" y2="384" marker-end="url(#arrowStore)"/>
+        <!-- vault -> resolve_tokens -->
+        <path d="M132,412 V884 H316" marker-end="url(#arrowStore)"/>
+      </g>
+      <text x="138" y="372" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--store)">issue</text>
+      <text x="138" y="500" font-family="IBM Plex Mono, monospace" font-size="10" fill="var(--store)">resolve</text>
+
+      <!-- messages store -->
+      <g>
+        <rect x="32" y="532" width="200" height="48" rx="3" fill="var(--store-soft)" stroke="var(--store)" stroke-width="1"/>
+        <text x="132" y="548" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="var(--store)">messages</text>
+        <text x="132" y="566" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--muted)">sanitized_content</text>
+      </g>
+      <g stroke="var(--store)" stroke-width="1" fill="none" stroke-dasharray="4 3">
+        <line x1="232" y1="556" x2="316" y2="544" marker-end="url(#arrowStore)"/>
+        <!-- messages also written on assistant persist -->
+        <path d="M132,580 V1028 H316" marker-end="url(#arrowStore)"/>
+      </g>
+
+      <!-- llm_requests store -->
+      <g>
+        <rect x="32" y="1014" width="200" height="48" rx="3" fill="var(--store-soft)" stroke="var(--store)" stroke-width="1"/>
+        <text x="132" y="1030" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="12.5" fill="var(--store)">llm_requests</text>
+        <text x="132" y="1048" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="10.5" fill="var(--muted)">tokens · cost · model</text>
+      </g>
+      <g stroke="var(--store)" stroke-width="1" fill="none" stroke-dasharray="4 3">
+        <line x1="232" y1="1038" x2="316" y2="1038" marker-end="url(#arrowStore)"/>
+      </g>
+
+      <!-- ===== RIGHT: fail-closed off-ramps ===== -->
+      <g font-family="IBM Plex Mono, monospace" font-size="11">
+        <!-- from n4 RiskScorer -> 422 -->
+        <g stroke="var(--danger)" stroke-width="1" fill="none">
+          <line x1="640" y1="304" x2="700" y2="304" marker-end="url(#arrowDanger)"/>
+        </g>
+        <rect x="700" y="284" width="228" height="40" rx="3" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1"/>
+        <text x="814" y="300" text-anchor="middle" fill="var(--danger)">422 · low-confidence / high-risk</text>
+        <text x="814" y="316" text-anchor="middle" font-size="10" fill="var(--muted)">message rejected before send</text>
+
+        <!-- from n6 assert_no_raw_pii -> 422 -->
+        <g stroke="var(--danger)" stroke-width="1" fill="none">
+          <line x1="640" y1="464" x2="700" y2="464" marker-end="url(#arrowDanger)"/>
+        </g>
+        <rect x="700" y="444" width="228" height="40" rx="3" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1"/>
+        <text x="814" y="460" text-anchor="middle" fill="var(--danger)">422 · residual PII</text>
+        <text x="814" y="476" text-anchor="middle" font-size="10" fill="var(--muted)">pseudonymization missed a span</text>
+
+        <!-- from n8 LLM -> 502 -->
+        <g stroke="var(--danger)" stroke-width="1" fill="none">
+          <line x1="660" y1="654" x2="700" y2="654" marker-end="url(#arrowDanger)"/>
+        </g>
+        <rect x="700" y="634" width="228" height="40" rx="3" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1"/>
+        <text x="814" y="650" text-anchor="middle" fill="var(--danger)">502 · provider unavailable</text>
+        <text x="814" y="666" text-anchor="middle" font-size="10" fill="var(--muted)">LLMProviderError</text>
+
+        <!-- from n9 leakage -> 500 + audit -->
+        <g stroke="var(--danger)" stroke-width="1" fill="none">
+          <line x1="640" y1="792" x2="700" y2="792" marker-end="url(#arrowDanger)"/>
+        </g>
+        <rect x="700" y="772" width="228" height="40" rx="3" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1"/>
+        <text x="814" y="788" text-anchor="middle" fill="var(--danger)">500 · leakage detected</text>
+        <text x="814" y="804" text-anchor="middle" font-size="10" fill="var(--muted)">audit_event written, no partial return</text>
+
+        <!-- from n10 resolve -> 500 + audit -->
+        <g stroke="var(--danger)" stroke-width="1" fill="none">
+          <line x1="640" y1="872" x2="700" y2="872" marker-end="url(#arrowDanger)"/>
+        </g>
+        <rect x="700" y="852" width="228" height="40" rx="3" fill="var(--danger-soft)" stroke="var(--danger)" stroke-width="1"/>
+        <text x="814" y="868" text-anchor="middle" fill="var(--danger)">500 · unresolved token</text>
+        <text x="814" y="884" text-anchor="middle" font-size="10" fill="var(--muted)">audit_event written, no opaque return</text>
+      </g>
+    </svg>
+    <figcaption>The request travels down the spine. The two teal dashes bracket the only component that lives outside the privacy boundary — the LLM provider — and the teal arrows are the only data that crosses it: pseudonymized text in, pseudonymized completion out. Stores (left, dashed) and fail-closed outcomes (right) never cross. The token vault is scoped to <code style="font-family:IBM Plex Mono,monospace">(tenant_id, conversation_id)</code>, so a token issued for one conversation cannot resolve in another.</figcaption>
+  </figure>
+
+  <div class="legend">
+    <span class="sw-acc"><span class="swatch"></span>pseudonymized text crossing the boundary</span>
+    <span class="sw-plain"><span class="swatch"></span>flow inside the boundary</span>
+    <span class="sw-store"><span class="swatch sw-dash"></span>data store read/write</span>
+    <span class="sw-danger"><span class="swatch"></span>fail-closed off-ramp</span>
+  </div>
+
+  <div class="notes">
+    <div class="note">
+      <h2>What the model sees</h2>
+      <p>The provider only ever receives pseudonymized text — the system-preservation prompt plus token-substituted content. Raw patient data, the token vault, and the message store all stay inside the boundary. The completion it returns is also pseudonymized (it reproduces tokens verbatim); plaintext reappears only after <code>resolve_tokens</code> substitutes them back.</p>
+    </div>
+    <div class="note">
+      <h2>What the diagram does not yet show</h2>
+      <p>Today the provider is called with a single message — no conversation history. The specced change sends full sanitized history as a message list and adds context-window trimming, per-conversation model selection, and an inline usage view. That history is the same pseudonymized <code>sanitized_content</code> shown here, so it crosses the boundary on the same teal arrow.</p>
+    </div>
+  </div>
+</div>

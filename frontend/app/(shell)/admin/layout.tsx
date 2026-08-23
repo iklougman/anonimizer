@@ -3,13 +3,14 @@
 import type { ReactNode } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { Box, Tabs, Text } from "@mantine/core";
 import { useMe } from "@/components/MeProvider";
-import styles from "./layout.module.css";
 
 const TABS = [
   { href: "/admin/users", label: "Benutzer", permission: "admin:users:manage" },
   { href: "/admin/branches", label: "Filialen", permission: "admin:branches:manage" },
   { href: "/admin/permissions", label: "Berechtigungen", permission: "admin:permissions:manage" },
+  { href: "/admin/apps", label: "Apps", permission: "admin:apps:manage" },
 ];
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
@@ -22,39 +23,33 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
   const hasAnyAdminPermission = me?.permissions.some((p) => p.startsWith("admin:")) ?? false;
 
   if (me === null) {
-    return <div className={styles.status}>Lädt…</div>;
+    return <Text c="dimmed">Lädt…</Text>;
   }
 
   if (!hasAnyAdminPermission) {
-    return (
-      <div className={styles.status}>
-        <p>Kein Zugriff auf die Verwaltung.</p>
-        <Link href="/" className={styles.backLink}>
-          Zurück zum Chat
-        </Link>
-      </div>
-    );
+    return <Text c="dimmed">Kein Zugriff auf die Verwaltung.</Text>;
   }
 
+  const visibleTabs = TABS.filter((tab) => me.permissions.includes(tab.permission));
+
   return (
-    <div className={styles.shell}>
-      <header className={styles.header}>
-        <Link href="/" className={styles.backLink}>
-          ← Chat
-        </Link>
-        <nav className={styles.tabs}>
-          {TABS.filter((tab) => me.permissions.includes(tab.permission)).map((tab) => (
-            <Link
+    <Box>
+      <Tabs value={pathname} mb={24}>
+        <Tabs.List>
+          {visibleTabs.map((tab) => (
+            <Tabs.Tab
               key={tab.href}
-              href={tab.href}
-              className={pathname === tab.href ? `${styles.tab} ${styles.tabActive}` : styles.tab}
-            >
-              {tab.label}
-            </Link>
+              value={tab.href}
+              renderRoot={(rootProps) => (
+                <Link href={tab.href} {...rootProps}>
+                  {tab.label}
+                </Link>
+              )}
+            />
           ))}
-        </nav>
-      </header>
-      <main className={styles.main}>{children}</main>
-    </div>
+        </Tabs.List>
+      </Tabs>
+      {children}
+    </Box>
   );
 }

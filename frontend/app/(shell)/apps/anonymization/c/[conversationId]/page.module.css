@@ -7,6 +7,10 @@
 }
 
 .readOnlyNotice {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
   padding: 14px 20px;
   border-top: 1px solid var(--color-border);
   background: var(--color-bg-subtle);

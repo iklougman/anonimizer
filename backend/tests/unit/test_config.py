@@ -40,6 +40,16 @@ def test_settings_requires_app_runtime_password_explicitly(monkeypatch):
         Settings(_env_file=None)
 
 
+def test_settings_requires_app_ops_password_explicitly(monkeypatch):
+    monkeypatch.setenv("ENVIRONMENT", "development")
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
+    monkeypatch.setenv("MASTER_KEY_PATH", "/run/secrets/master_key")
+    monkeypatch.setenv("APP_RUNTIME_PASSWORD", "runtime-secret")
+    monkeypatch.delenv("APP_OPS_PASSWORD", raising=False)
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None)
+
+
 def test_settings_defaults_are_secure(monkeypatch):
     monkeypatch.setenv("ENVIRONMENT", "development")
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://u:p@localhost:5432/db")
@@ -101,7 +111,7 @@ def test_settings_auth_and_llm_defaults(monkeypatch):
     assert settings.keycloak_audience == "chatgpt-proxy-frontend"
     assert settings.llm_provider == "ollama"
     assert settings.openai_api_key is None
-    assert settings.openai_model == "gpt-4o-mini"
+    assert settings.openai_model == "gpt-5-nano"
     assert settings.ollama_base_url == "http://ollama:11434"
     assert settings.ollama_model == "llama3.1"
 

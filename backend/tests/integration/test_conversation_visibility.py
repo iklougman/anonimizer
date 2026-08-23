@@ -18,6 +18,7 @@ from app.db.repositories.user_repository import UserRepository
 from app.db.session import SessionLocal, tenant_scoped_session
 from app.main import app
 from app.privacy_gateway.token_vault.key_provider import FileSecretKeyProvider
+from tests.conftest import grant_app_entitlement
 
 
 @pytest.fixture(autouse=True)
@@ -39,6 +40,7 @@ def _create_tenant(tmp_path, name="Visibility Clinic"):
             name=name, keycloak_realm=f"realm-{uuid.uuid4()}", retention_days=30
         )
         session.commit()
+        grant_app_entitlement(tenant.id)
         return tenant.id
 
 

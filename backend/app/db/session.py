@@ -8,7 +8,20 @@ from sqlalchemy.orm import Session, SessionTransaction, sessionmaker
 
 from app.config import get_settings
 
-engine = create_engine(get_settings().app_database_url)
+_settings = get_settings()
+engine = create_engine(
+    _settings.app_database_url,
+    pool_size=_settings.db_pool_size,
+    max_overflow=_settings.db_max_overflow,
+    pool_timeout=_settings.db_pool_timeout,
+    # A connection that's been idle in the pool (e.g. across a Postgres
+    # restart, or a load balancer/proxy silently dropping it) is detected and
+    # transparently replaced here instead of surfacing as an opaque
+    # "server closed the connection unexpectedly" on the next checkout --
+    # matters more once streaming responses (Feature A) hold connections open
+    # for longer than today's quick request/response cycle.
+    pool_pre_ping=True,
+)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False)
 
 

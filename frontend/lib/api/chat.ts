@@ -3,6 +3,7 @@ const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8
 export interface SendMessageCallbacks {
   onDelta: (delta: string) => void;
   onDone: (result: { id: string; created_at: string }) => void;
+  onError: (error: { detail: string }) => void;
 }
 
 export class ChatApiError extends Error {
@@ -77,5 +78,7 @@ function processFrame(frame: string, callbacks: SendMessageCallbacks): void {
     callbacks.onDelta(data.delta);
   } else if (event === "done") {
     callbacks.onDone(data);
+  } else if (event === "error") {
+    callbacks.onError(data);
   }
 }

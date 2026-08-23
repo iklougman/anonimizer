@@ -19,6 +19,7 @@ from app.privacy_gateway.pseudonymization.pseudonymizer import Pseudonymizer
 from app.privacy_gateway.risk_scoring.scorer import RiskScorer
 from app.privacy_gateway.token_vault.key_provider import FileSecretKeyProvider
 from app.privacy_gateway.token_vault.vault import TokenVault
+from tests.conftest import grant_app_entitlement
 
 CORPUS_DIR = Path(__file__).resolve().parents[3] / "evaluation" / "golden_corpus"
 
@@ -83,6 +84,7 @@ def new_scope(key_provider) -> tuple[uuid.UUID, uuid.UUID]:
         )
         session.commit()
         tenant_id = tenant.id
+    grant_app_entitlement(tenant_id)
     with tenant_scoped_session(tenant_id) as session:
         user = UserRepository(session).create(
             tenant_id,
@@ -108,6 +110,7 @@ def new_scope_with_user(key_provider) -> tuple[uuid.UUID, uuid.UUID, uuid.UUID]:
         )
         session.commit()
         tenant_id = tenant.id
+    grant_app_entitlement(tenant_id)
     with tenant_scoped_session(tenant_id) as session:
         user = UserRepository(session).create(
             tenant_id, keycloak_subject=f"sub-{uuid.uuid4()}", email="doc@example.com", role="doctor"

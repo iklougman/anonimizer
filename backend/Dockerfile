@@ -19,4 +19,10 @@ RUN python scripts/fetch_reference_data.py
 
 EXPOSE 8000
 
-CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"]
+# UVICORN_WORKERS default of 4 assumes a ~2-vCPU-or-better compose host
+# (standard uvicorn/gunicorn guidance: workers ~= 2x vCPU count); re-measure
+# against a real load test (see docker-compose.yml) rather than trusting this
+# blindly on a different host. docker-compose.override.yml replaces this whole
+# command for local dev (single worker + --reload; --reload and multiple
+# workers are mutually exclusive in uvicorn).
+CMD ["sh", "-c", "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers ${UVICORN_WORKERS:-4}"]

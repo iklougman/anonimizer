@@ -23,7 +23,23 @@ class Settings(BaseSettings):
     database_url: str
     master_key_path: str
     app_runtime_password: str
+    # DB identity for the internal-only Django ops-admin service (migration
+    # 0007 provisions the `app_ops` role with this password) -- read here too
+    # since the migration environment imports Settings the same way 0003 does
+    # for app_runtime_password.
+    app_ops_password: str
     patient_number_pattern: str = DEFAULT_PATIENT_NUMBER_PATTERN
+
+    # Explicit, env-tunable pool sizing rather than SQLAlchemy's accidental
+    # defaults (pool_size=5, max_overflow=10). Each uvicorn worker process gets
+    # its own engine/pool (app/db/session.py's create_engine() is module-level,
+    # re-instantiated per process), so the real ceiling on Postgres connections
+    # from this service is `--workers * (db_pool_size + db_max_overflow)` --
+    # see docker-compose.yml's postgres `max_connections` override, sized with
+    # this in mind.
+    db_pool_size: int = 10
+    db_max_overflow: int = 10
+    db_pool_timeout: int = 30
     # Parsing the bundled ORDO OWL + Krankenhausverzeichnis xlsx at startup (design
     # spec §6) costs minutes and gigabytes; the test suite injects small in-memory
     # reference sets instead, so it turns the warm-up off.

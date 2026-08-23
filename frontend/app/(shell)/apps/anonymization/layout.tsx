@@ -2,7 +2,7 @@ import type { ReactNode } from "react";
 import { ConversationSidebar } from "@/components/ConversationSidebar";
 import styles from "./layout.module.css";
 
-export default function ChatLayout({ children }: { children: ReactNode }) {
+export default function AnonymizationLayout({ children }: { children: ReactNode }) {
   return (
     <div className={styles.shell}>
       <ConversationSidebar />

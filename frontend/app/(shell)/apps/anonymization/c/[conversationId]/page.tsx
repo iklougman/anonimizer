@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams } from "next/navigation";
 import { useSession } from "next-auth/react";
+import { IconLock } from "@tabler/icons-react";
 import { getConversation, getMessages } from "@/lib/api/conversations";
 import { sendMessage, ChatApiError } from "@/lib/api/chat";
 import type { ConversationDetail, MessageOut } from "@/lib/api/types";
@@ -12,7 +13,8 @@ import styles from "./page.module.css";
 
 type DisplayItem =
   | { kind: "message"; message: MessageOut }
-  | { kind: "error"; status: number; message: string; retryContent: string };
+  | { kind: "error"; status: number; message: string; retryContent: string }
+  | { kind: "aborted"; partialContent: string; retryContent: string };
 
 export default function ConversationPage() {
   const { conversationId } = useParams<{ conversationId: string }>();
@@ -77,6 +79,17 @@ export default function ConversationPage() {
           ]);
           setPendingAssistantText(null);
         },
+        // The turn is never persisted on a guard/provider failure (see
+        // backend/app/api/chat.py's _stream_and_guard), so this partial text
+        // is shown only for this render -- a reload re-fetches persisted
+        // messages and correctly won't include it.
+        onError: () => {
+          setItems((current) => [
+            ...current,
+            { kind: "aborted", partialContent: accumulatedText, retryContent: content },
+          ]);
+          setPendingAssistantText(null);
+        },
       });
     } catch (error) {
       const chatError =
@@ -102,25 +115,37 @@ export default function ConversationPage() {
             onRetry={loadMessages}
           />
         )}
-        {items.map((item, index) =>
-          item.kind === "message" ? (
-            <MessageBubble key={item.message.id} message={item.message} />
-          ) : (
+        {items.map((item, index) => {
+          if (item.kind === "message") {
+            return <MessageBubble key={item.message.id} message={item.message} />;
+          }
+          if (item.kind === "aborted") {
+            return (
+              <MessageBubble
+                key={`aborted-${index}`}
+                aborted={{ partialContent: item.partialContent }}
+                onRetry={() => handleSend(item.retryContent)}
+              />
+            );
+          }
+          return (
             <MessageBubble
               key={`error-${index}`}
               error={{ status: item.status, message: item.message }}
               onRetry={() => handleSend(item.retryContent)}
             />
-          )
-        )}
+          );
+        })}
         {sending && pendingAssistantText !== null && (
           <MessageBubble
-            message={{ id: "pending", role: "assistant", content: pendingAssistantText || "…", created_at: "" }}
+            message={{ id: "pending", role: "assistant", content: pendingAssistantText, created_at: "" }}
+            streaming
           />
         )}
       </div>
       {isReadOnly ? (
         <div className={styles.readOnlyNotice}>
+          <IconLock size={14} />
           Schreibgeschützt — Unterhaltung von {conversation.owner_email}
         </div>
       ) : (
