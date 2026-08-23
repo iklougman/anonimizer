@@ -2,6 +2,7 @@ import os
 import secrets
 import uuid
 from datetime import datetime, timezone
+from typing import Literal
 
 import sqlalchemy as sa
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -13,18 +14,27 @@ from app.privacy_gateway.token_vault.key_provider import KeyProvider
 
 _NONCE_LENGTH = 12
 
+ScopeType = Literal["conversation", "document"]
 
-def _associated_data(tenant_id: uuid.UUID, conversation_id: uuid.UUID, token: str) -> bytes:
+
+def _associated_data(tenant_id: uuid.UUID, scope_type: ScopeType, scope_id: uuid.UUID, token: str) -> bytes:
     """AES-GCM associated data binding a ciphertext to the exact row it belongs to.
 
     The DEK is per-tenant, not per-row, so without AAD a ciphertext blob would be
-    interchangeable between any two `token_mappings` rows of the same tenant — copying
-    one conversation's `encrypted_value` into another conversation's row would still
-    decrypt cleanly, defeating ADR-0009's conversation scoping at the storage layer.
-    Binding the AAD to `(tenant_id, conversation_id, token)` makes any such move fail
+    interchangeable between any two `token_mappings` rows of the same tenant —
+    copying one scope's `encrypted_value` into another scope's row would still
+    decrypt cleanly, defeating ADR-0009's scoping at the storage layer. Binding the
+    AAD to `(tenant_id, scope_type, scope_id, token)` makes any such move fail
     with `cryptography.exceptions.InvalidTag`.
+
+    `scope_type` is bound in addition to `scope_id` (not just `f"{scope_id}"`) so
+    that a document-scoped mapping's ciphertext cannot decrypt under a
+    conversation-scoped lookup even in the practically-impossible case of a
+    document UUID colliding with a conversation UUID — defense in depth beyond
+    what the schema's CHECK constraint and partial unique indexes already
+    guarantee. See docs/adr/0023-token-vault-scope-generalization.md.
     """
-    return f"{tenant_id}:{conversation_id}:{token}".encode()
+    return f"{tenant_id}:{scope_type}:{scope_id}:{token}".encode()
 
 
 class TokenVault:
@@ -34,7 +44,8 @@ class TokenVault:
     def create_mapping(
         self,
         tenant_id: uuid.UUID,
-        conversation_id: uuid.UUID,
+        scope_type: ScopeType,
+        scope_id: uuid.UUID,
         entity_type: str,
         original_value: str,
     ) -> str:
@@ -45,12 +56,14 @@ class TokenVault:
             raw_dek = self.key_provider.unwrap_dek(dek_row.wrapped_dek)
 
             nonce = os.urandom(_NONCE_LENGTH)
-            aad = _associated_data(tenant_id, conversation_id, token)
+            aad = _associated_data(tenant_id, scope_type, scope_id, token)
             ciphertext = AESGCM(raw_dek).encrypt(nonce, original_value.encode("utf-8"), aad)
 
             mapping = TokenMapping(
                 tenant_id=tenant_id,
-                conversation_id=conversation_id,
+                scope_type=scope_type,
+                conversation_id=scope_id if scope_type == "conversation" else None,
+                document_id=scope_id if scope_type == "document" else None,
                 token=token,
                 entity_type=entity_type,
                 encrypted_value=nonce + ciphertext,
@@ -61,10 +74,10 @@ class TokenVault:
         return token
 
     def resolve_token(
-        self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, token: str
+        self, tenant_id: uuid.UUID, scope_type: ScopeType, scope_id: uuid.UUID, token: str
     ) -> str | None:
         with tenant_scoped_session(tenant_id) as session:
-            mapping = self._find_mapping(session, tenant_id, conversation_id, token)
+            mapping = self._find_mapping(session, tenant_id, scope_type, scope_id, token)
             if mapping is None:
                 return None
 
@@ -78,40 +91,53 @@ class TokenVault:
 
             nonce = mapping.encrypted_value[:_NONCE_LENGTH]
             ciphertext = mapping.encrypted_value[_NONCE_LENGTH:]
-            aad = _associated_data(tenant_id, conversation_id, token)
+            aad = _associated_data(tenant_id, scope_type, scope_id, token)
             # An InvalidTag here means the ciphertext does not belong to this row —
             # it must propagate, never be swallowed into a None/plaintext result.
             return AESGCM(raw_dek).decrypt(nonce, ciphertext, aad).decode("utf-8")
 
     def resolve_tokens(
-        self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, tokens: list[str]
+        self, tenant_id: uuid.UUID, scope_type: ScopeType, scope_id: uuid.UUID, tokens: list[str]
     ) -> dict[str, str]:
         resolved: dict[str, str] = {}
         for token in tokens:
-            value = self.resolve_token(tenant_id, conversation_id, token)
+            value = self.resolve_token(tenant_id, scope_type, scope_id, token)
             if value is not None:
                 resolved[token] = value
         return resolved
 
-    def delete_mapping(self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, token: str) -> None:
+    def delete_mapping(
+        self, tenant_id: uuid.UUID, scope_type: ScopeType, scope_id: uuid.UUID, token: str
+    ) -> None:
         with tenant_scoped_session(tenant_id) as session:
-            mapping = self._find_mapping(session, tenant_id, conversation_id, token)
+            mapping = self._find_mapping(session, tenant_id, scope_type, scope_id, token)
             if mapping is not None:
                 session.delete(mapping)
 
-    def expire_mapping(self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, token: str) -> None:
+    def expire_mapping(
+        self, tenant_id: uuid.UUID, scope_type: ScopeType, scope_id: uuid.UUID, token: str
+    ) -> None:
         with tenant_scoped_session(tenant_id) as session:
-            mapping = self._find_mapping(session, tenant_id, conversation_id, token)
+            mapping = self._find_mapping(session, tenant_id, scope_type, scope_id, token)
             if mapping is not None:
                 mapping.deleted_at = datetime.now(timezone.utc)
 
     def _find_mapping(
-        self, session: Session, tenant_id: uuid.UUID, conversation_id: uuid.UUID, token: str
+        self,
+        session: Session,
+        tenant_id: uuid.UUID,
+        scope_type: ScopeType,
+        scope_id: uuid.UUID,
+        token: str,
     ) -> TokenMapping | None:
         now = datetime.now(timezone.utc)
+        scope_column = (
+            TokenMapping.conversation_id if scope_type == "conversation" else TokenMapping.document_id
+        )
         stmt = sa.select(TokenMapping).where(
             TokenMapping.tenant_id == tenant_id,
-            TokenMapping.conversation_id == conversation_id,
+            TokenMapping.scope_type == scope_type,
+            scope_column == scope_id,
             TokenMapping.token == token,
             TokenMapping.deleted_at.is_(None),
             # Fail-safe by construction: an expired-but-not-yet-reaped mapping is
