@@ -124,7 +124,7 @@ class OutputGuard:
         unresolved = sorted({token for token in tokens if token not in resolved})
         if unresolved:
             raise UnresolvedTokenError(
-                "token(s) not issued for this tenant and conversation: "
+                "token(s) not issued for this tenant and scope: "
                 + ", ".join(unresolved)
                 + "; the response is rejected rather than returned opaque",
                 tokens=unresolved,

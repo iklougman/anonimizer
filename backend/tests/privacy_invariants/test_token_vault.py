@@ -69,6 +69,20 @@ def test_create_and_resolve_round_trip(key_provider):
     assert token.startswith("PATIENT_")
 
 
+def test_resolve_token_raises_for_an_invalid_scope_type(key_provider):
+    """_find_mapping's scope-column dispatch must fail loudly on an unrecognized
+    scope_type rather than silently falling through to the document column (or any
+    other implicit default) -- guards against a future third ScopeType value being
+    mishandled."""
+    tenant_id, conversation_id = _create_tenant_and_conversation(key_provider)
+    vault = TokenVault(key_provider)
+
+    token = vault.create_mapping(tenant_id, "conversation", conversation_id, "PATIENT", "Hans Müller")
+
+    with pytest.raises(ValueError, match="patient"):
+        vault.resolve_token(tenant_id, "patient", conversation_id, token)
+
+
 def test_resolve_fails_for_wrong_tenant(key_provider):
     tenant_a, conversation_a = _create_tenant_and_conversation(key_provider)
     tenant_b, _ = _create_tenant_and_conversation(key_provider)

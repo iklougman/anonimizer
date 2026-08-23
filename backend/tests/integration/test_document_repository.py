@@ -144,6 +144,44 @@ def test_set_status_and_set_result(key_provider):
         assert document.document_type == "image"
 
 
+def test_set_result_clears_stale_error_message_from_a_prior_failure(key_provider):
+    """A document that failed once (error_message set via set_status) and later
+    succeeds on a retry must not keep the stale error_message -- set_result should
+    clear it on every successful result, mirroring set_status clearing it on every
+    call."""
+    tenant_id, user_id = _create_tenant_and_user(key_provider)
+    with tenant_scoped_session(tenant_id) as session:
+        document_id = DocumentRepository(session).create(
+            tenant_id, user_id, filename="scan.png", content_type="image/png",
+            byte_size=10, raw_storage_path="/data/documents/x/y/original.png",
+        ).id
+
+    with tenant_scoped_session(tenant_id) as session:
+        DocumentRepository(session).set_status(
+            tenant_id, document_id, "failed", error_message="OCR engine crashed"
+        )
+
+    with tenant_scoped_session(tenant_id) as session:
+        document = DocumentRepository(session).get(tenant_id, document_id)
+        assert document.status == "failed"
+        assert document.error_message == "OCR engine crashed"
+
+    with tenant_scoped_session(tenant_id) as session:
+        DocumentRepository(session).set_result(
+            tenant_id,
+            document_id,
+            structured_blocks=[],
+            sanitized_markdown="Hallo PATIENT_ABCDE12345",
+            page_count=1,
+            document_type="image",
+        )
+
+    with tenant_scoped_session(tenant_id) as session:
+        document = DocumentRepository(session).get(tenant_id, document_id)
+        assert document.status == "ready"
+        assert document.error_message is None
+
+
 def test_documents_catalog_row_is_seeded_and_active():
     with SessionLocal() as session:
         row = session.execute(

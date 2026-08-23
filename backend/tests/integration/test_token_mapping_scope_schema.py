@@ -48,7 +48,7 @@ def _setup(key_provider):
 
 def test_check_constraint_rejects_conversation_scope_with_document_id_set(key_provider):
     tenant_id, document_id, dek_id = _setup(key_provider)
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="ck_token_mappings_scope_consistency"):
         with tenant_scoped_session(tenant_id) as session:
             session.add(
                 TokenMapping(
@@ -66,12 +66,56 @@ def test_check_constraint_rejects_conversation_scope_with_document_id_set(key_pr
 
 def test_check_constraint_rejects_document_scope_with_no_document_id(key_provider):
     tenant_id, document_id, dek_id = _setup(key_provider)
-    with pytest.raises(IntegrityError):
+    with pytest.raises(IntegrityError, match="ck_token_mappings_scope_consistency"):
         with tenant_scoped_session(tenant_id) as session:
             session.add(
                 TokenMapping(
                     tenant_id=tenant_id,
                     scope_type="document",
+                    conversation_id=None,
+                    document_id=None,
+                    token="PATIENT_AAAAAAAAAA",
+                    entity_type="PATIENT",
+                    encrypted_value=b"x" * 28,
+                    dek_id=dek_id,
+                )
+            )
+
+
+def test_check_constraint_rejects_document_scope_with_conversation_id_set(key_provider):
+    """Mirror of the conversation-scope case above: scope_type='document' with
+    conversation_id also populated must be rejected by the CHECK constraint, even
+    though document_id is correctly set too."""
+    tenant_id, document_id, dek_id = _setup(key_provider)
+    with pytest.raises(IntegrityError, match="ck_token_mappings_scope_consistency"):
+        with tenant_scoped_session(tenant_id) as session:
+            session.add(
+                TokenMapping(
+                    tenant_id=tenant_id,
+                    scope_type="document",
+                    conversation_id=uuid.uuid4(),
+                    document_id=document_id,
+                    token="PATIENT_AAAAAAAAAA",
+                    entity_type="PATIENT",
+                    encrypted_value=b"x" * 28,
+                    dek_id=dek_id,
+                )
+            )
+
+
+def test_check_constraint_rejects_invalid_scope_type_discriminator(key_provider):
+    """scope_type is a free-standing String column, not a Postgres ENUM, so the
+    CHECK constraint itself is what has to reject a value outside
+    {'conversation', 'document'} -- neither disjunct of its OR condition can match
+    a scope_type that is neither, even with both conversation_id and document_id
+    left NULL."""
+    tenant_id, document_id, dek_id = _setup(key_provider)
+    with pytest.raises(IntegrityError, match="ck_token_mappings_scope_consistency"):
+        with tenant_scoped_session(tenant_id) as session:
+            session.add(
+                TokenMapping(
+                    tenant_id=tenant_id,
+                    scope_type="patient",
                     conversation_id=None,
                     document_id=None,
                     token="PATIENT_AAAAAAAAAA",
@@ -117,6 +161,14 @@ def test_same_token_string_allowed_across_a_conversation_and_a_document_scope(ke
                 dek_id=dek_id,
             )
         )
+
+    with tenant_scoped_session(tenant_id) as session:
+        count = session.execute(
+            sa.select(sa.func.count())
+            .select_from(TokenMapping)
+            .where(TokenMapping.tenant_id == tenant_id, TokenMapping.token == "PATIENT_SAMETOKEN01")
+        ).scalar_one()
+        assert count == 2
 
 
 def test_duplicate_token_within_same_document_scope_is_rejected(key_provider):

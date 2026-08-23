@@ -67,7 +67,11 @@ than silently inheriting conversation scoping for what might be a new kind of
 scope. `backend/tests/privacy_invariants/test_token_vault.py` gained explicit
 cross-scope isolation tests (a document-scoped token must not resolve as
 conversation-scoped, and vice versa) alongside every pre-existing test, updated to
-the new call shape rather than left behind.
+the new call shape rather than left behind. Migration `0009` does not re-encrypt
+existing rows, so any `token_mappings` row written before this change was deployed
+will fail to decrypt afterward with an uncaught `InvalidTag` (see the migration's
+docstring for the required remediation before deploying to an environment with
+pre-existing data).
 
 ## Security Implications
 

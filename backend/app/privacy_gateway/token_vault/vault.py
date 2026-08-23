@@ -131,9 +131,12 @@ class TokenVault:
         token: str,
     ) -> TokenMapping | None:
         now = datetime.now(timezone.utc)
-        scope_column = (
-            TokenMapping.conversation_id if scope_type == "conversation" else TokenMapping.document_id
-        )
+        if scope_type == "conversation":
+            scope_column = TokenMapping.conversation_id
+        elif scope_type == "document":
+            scope_column = TokenMapping.document_id
+        else:
+            raise ValueError(f"unsupported scope_type: {scope_type!r}")
         stmt = sa.select(TokenMapping).where(
             TokenMapping.tenant_id == tenant_id,
             TokenMapping.scope_type == scope_type,

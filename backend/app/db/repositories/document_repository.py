@@ -81,6 +81,7 @@ class DocumentRepository(BaseRepository):
                 sanitized_markdown=sanitized_markdown,
                 page_count=page_count,
                 document_type=document_type,
+                error_message=None,
                 updated_at=sa.func.now(),
             )
         )

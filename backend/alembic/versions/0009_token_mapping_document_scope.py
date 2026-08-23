@@ -14,6 +14,36 @@ unique indexes -- see docs/adr/0023-token-vault-scope-generalization.md.
 Existing rows are backfilled to scope_type='conversation' before the CHECK
 constraint is added, since every row created before this migration is
 conversation-scoped by construction.
+
+AAD hazard: the accompanying `TokenVault` code change (not this migration)
+changes the AES-GCM associated data bound to each `token_mappings.encrypted_value`
+from `f"{tenant_id}:{conversation_id}:{token}"` to
+`f"{tenant_id}:{scope_type}:{scope_id}:{token}"`. This migration does NOT
+re-encrypt any existing rows, so any row written before this change was deployed
+will fail to decrypt afterward with `cryptography.exceptions.InvalidTag` -- which
+is deliberately uncaught and propagates as an unhandled exception (an HTTP 500 on
+`GET /api/conversations/{id}/messages`, or an unhandled exception mid-SSE-stream
+during a chat response), not a handled rejection. Deploying this change to any
+environment with pre-existing `token_mappings` data requires first either (a)
+re-encrypting those rows -- unwrap the DEK, decrypt with the legacy 3-field AAD
+`f"{tenant_id}:{conversation_id}:{token}"`, re-encrypt with the new 4-field AAD --
+or (b) expiring them (`UPDATE token_mappings SET deleted_at = now()`) so they fail
+through the handled `UnresolvedTokenError` path instead.
+
+Lock profile: this migration runs a full-table UPDATE, a NOT NULL alteration, a
+CHECK constraint addition, an FK addition, and two non-concurrent index builds all
+inside one transaction, which blocks writes to `token_mappings` for its duration.
+That is an acceptable tradeoff at this project's current (dev/research, "tens of
+concurrent users") scale, but a future reader running this against a
+larger/production table should revisit it: a batched backfill, `NOT VALID` +
+a separate `VALIDATE CONSTRAINT` for the CHECK, and `CREATE INDEX CONCURRENTLY`
+run outside the transaction.
+
+Downgrade precondition: `downgrade()` re-applies `conversation_id NOT NULL`, which
+will raise if any document-scoped rows (`scope_type='document'`) exist at
+downgrade time -- this is intentional fail-loud behavior, not a bug. If you hit
+it, delete or re-scope the document-scoped `token_mappings` rows before
+downgrading.
 """
 from typing import Sequence, Union
 
