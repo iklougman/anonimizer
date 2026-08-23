@@ -6,7 +6,12 @@ from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy.orm import Session
 
 from app.api.schemas import ConversationDetail, ConversationSummary, MessageOut
-from app.auth.dependencies import get_current_user, get_db_session, require_permission
+from app.auth.dependencies import (
+    get_current_user,
+    get_db_session,
+    require_app_entitlement,
+    require_permission,
+)
 from app.auth.permissions import Permission, can_read_conversation, visibility_scope
 from app.auth.tenant_resolver import AuthenticatedUser
 from app.db.repositories.audit_event_repository import AuditEventRepository
@@ -47,6 +52,7 @@ def list_conversations(
 @router.post("", response_model=ConversationSummary, status_code=201)
 def create_conversation(
     user: AuthenticatedUser = Depends(require_permission(Permission.CONVERSATIONS_CREATE)),
+    _entitlement: AuthenticatedUser = Depends(require_app_entitlement(app_key="anonymization")),
     session: Session = Depends(get_db_session),
 ) -> ConversationSummary:
     conversation = ConversationRepository(session).create(user.tenant_id, user.user_id)

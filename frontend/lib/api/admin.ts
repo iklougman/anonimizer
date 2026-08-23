@@ -1,4 +1,4 @@
-import type { AdminUser, AdminUserCreated, Branch, PermissionMatrix } from "./types";
+import type { AdminUser, AdminUserCreated, App, Branch, PermissionMatrix } from "./types";
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000";
 
@@ -131,5 +131,29 @@ export async function putPermissionMatrix(
     body: JSON.stringify({ matrix }),
   });
   if (!response.ok) throw new AdminApiError(response.status, await parseErrorDetail(response, "failed to save permissions"));
+  return response.json();
+}
+
+// --- Apps -----------------------------------------------------------
+
+export async function listApps(accessToken: string): Promise<App[]> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/apps`, {
+    headers: { Authorization: `Bearer ${accessToken}` },
+  });
+  if (!response.ok) throw new AdminApiError(response.status, await parseErrorDetail(response, "failed to list apps"));
+  return response.json();
+}
+
+export async function putAppAssignment(
+  accessToken: string,
+  appId: string,
+  input: { branch_id: string | null; is_enabled: boolean }
+): Promise<App["assignments"][number]> {
+  const response = await fetch(`${API_BASE_URL}/api/admin/apps/${appId}/assignment`, {
+    method: "PUT",
+    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+  if (!response.ok) throw new AdminApiError(response.status, await parseErrorDetail(response, "failed to update app assignment"));
   return response.json();
 }

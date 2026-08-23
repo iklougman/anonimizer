@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import type { KeyboardEvent } from "react";
+import { IconSend2 } from "@tabler/icons-react";
 import styles from "./Composer.module.css";
 
 export function Composer({
@@ -37,8 +38,14 @@ export function Composer({
         onChange={(event) => setValue(event.target.value)}
         onKeyDown={handleKeyDown}
       />
-      <button type="button" className={styles.sendButton} disabled={disabled} onClick={submit}>
-        Send
+      <button
+        type="button"
+        className={styles.sendButton}
+        disabled={disabled || !value.trim()}
+        onClick={submit}
+        aria-label="Senden"
+      >
+        <IconSend2 size={18} />
       </button>
     </div>
   );

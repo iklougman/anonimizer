@@ -1,11 +1,22 @@
 import os
 import uuid
 
+import sqlalchemy as sa
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
-from app.models import Tenant, TenantKey
+from app.models import App, Tenant, TenantAppAssignment, TenantKey
 from app.privacy_gateway.token_vault.key_provider import KeyProvider
+
+# `tenant_app_entitlements` (the ops-controlled subscription grant) is
+# deliberately NOT written here: app_runtime has read-only access to that
+# table by design (migration 0007) -- only the internal Django ops-admin
+# service (via app_ops) may grant an entitlement. Pre-creating a tenant-wide
+# *assignment* here (app_runtime has full CRUD on tenant_app_assignments) is
+# still worthwhile: once ops grants the "anonymization" entitlement through
+# the Django admin, the tenant is immediately enabled with no second admin
+# action required on the tenant-admin side.
+_BASE_APP_KEY = "anonymization"
 
 
 class TenantRepository:
@@ -54,6 +65,17 @@ class TenantRepository:
         tenant_key = TenantKey(tenant_id=tenant.id, wrapped_dek=wrapped_dek, key_version=1)
         self.session.add(tenant_key)
         self.session.flush()
+
+        base_app = self.session.execute(
+            sa.select(App.id).where(App.key == _BASE_APP_KEY)
+        ).scalar_one_or_none()
+        if base_app is not None:
+            self.session.add(
+                TenantAppAssignment(
+                    tenant_id=tenant.id, app_id=base_app, branch_id=None, is_enabled=True, assigned_by=None
+                )
+            )
+            self.session.flush()
 
         return tenant
 

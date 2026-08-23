@@ -1,0 +1,22 @@
+.emptyState {
+  margin: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 8px;
+  max-width: 320px;
+  color: var(--color-text-faint);
+}
+
+.emptyState p {
+  margin: 4px 0 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+}
+
+.emptyState span {
+  font-size: 13.5px;
+  line-height: 1.5;
+}

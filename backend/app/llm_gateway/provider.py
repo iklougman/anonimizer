@@ -1,13 +1,22 @@
 from __future__ import annotations
 
 import decimal
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import Protocol
 
 
 @dataclass(frozen=True)
-class LLMCompletion:
+class StreamDelta:
+    """One fragment of provider-generated text, in arrival order."""
+
     text: str
+
+
+@dataclass(frozen=True)
+class StreamUsage:
+    """Terminal item of a stream() iterator -- exactly one, after every delta."""
+
     tokens_in: int
     tokens_out: int
     cost_usd: decimal.Decimal
@@ -38,7 +47,14 @@ class LLMProvider(Protocol):
     name: str
     model: str
 
-    def complete(self, messages: list[ChatMessage]) -> LLMCompletion: ...
+    def stream(self, messages: list[ChatMessage]) -> Iterator[StreamDelta | StreamUsage]:
+        """Yield zero or more StreamDelta fragments in arrival order, followed
+        by exactly one terminal StreamUsage. Real token-by-token streaming
+        (Feature A) -- the caller (app/api/chat.py) buffers deltas to a
+        sentence/paragraph boundary and runs the existing output guard on each
+        completed chunk before releasing it, rather than waiting for the
+        whole response."""
+        ...
 
 
 # Prepended by the chat orchestrator (app/api/chat.py) as the leading ``system``

@@ -13,6 +13,9 @@ def test_all_tables_registered():
         "tenant_keys",
         "audit_events",
         "llm_requests",
+        "apps",
+        "tenant_app_entitlements",
+        "tenant_app_assignments",
     }
     assert set(Base.metadata.tables.keys()) == expected
 
@@ -28,6 +31,8 @@ def test_tenant_scoped_tables_have_tenant_id_column():
         "tenant_keys",
         "audit_events",
         "llm_requests",
+        "tenant_app_entitlements",
+        "tenant_app_assignments",
     }
     for table_name in tenant_scoped:
         table = Base.metadata.tables[table_name]

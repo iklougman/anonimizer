@@ -1,15 +1,20 @@
 .sidebar {
   width: 280px;
   flex-shrink: 0;
-  background: var(--color-bg-subtle);
+  background: var(--color-bg);
   border-right: 1px solid var(--color-border);
   padding: 16px 12px;
   display: flex;
   flex-direction: column;
   gap: 4px;
+  overflow-y: auto;
 }
 
 .newButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
   background: var(--color-accent);
   color: var(--color-accent-contrast);
   border: none;
@@ -19,11 +24,20 @@
   font-size: 14px;
   cursor: pointer;
   margin-bottom: 12px;
-  text-align: left;
+  transition: filter 150ms ease, transform 150ms ease;
 }
 
 .newButton:hover {
-  opacity: 0.92;
+  filter: brightness(0.92);
+}
+
+.newButton:active {
+  transform: scale(0.98);
+}
+
+.newButton:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
 }
 
 .conversationItem {
@@ -31,15 +45,22 @@
   align-items: center;
   justify-content: space-between;
   border-radius: var(--radius-sm);
-  padding: 8px 10px;
+  padding: 9px 10px;
   cursor: pointer;
   color: var(--color-text-muted);
-  font-size: 14px;
+  font-size: 13.5px;
   gap: 8px;
+  transition: background-color 150ms ease, color 150ms ease;
 }
 
 .conversationItem:hover {
   background: var(--color-accent-subtle);
+  color: var(--color-text);
+}
+
+.conversationItem:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: -2px;
 }
 
 .conversationItemActive {
@@ -67,18 +88,27 @@
 }
 
 .deleteButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
   background: none;
   border: none;
   color: var(--color-text-faint);
   cursor: pointer;
-  font-size: 13px;
-  padding: 2px 6px;
+  padding: 4px;
   border-radius: var(--radius-sm);
+  transition: background-color 150ms ease, color 150ms ease;
 }
 
 .deleteButton:hover {
   color: var(--color-error-text);
   background: var(--color-error-bg);
+}
+
+.deleteButton:focus-visible {
+  outline: 2px solid var(--color-error-text);
+  outline-offset: 1px;
 }
 
 .loadError {
@@ -109,16 +139,57 @@
   background: var(--color-error-border);
 }
 
-.adminLink {
-  margin-top: auto;
-  padding: 10px;
-  border-top: 1px solid var(--color-border);
-  color: var(--color-text-muted);
-  text-decoration: none;
-  font-size: 13px;
-  font-weight: 500;
+.skeletonList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
-.adminLink:hover {
-  color: var(--color-text);
+.skeletonItem {
+  height: 32px;
+  border-radius: var(--radius-sm);
+  background: linear-gradient(
+    90deg,
+    var(--color-bg-subtle) 25%,
+    var(--color-accent-subtle) 50%,
+    var(--color-bg-subtle) 75%
+  );
+  background-size: 200% 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.emptyState {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 6px;
+  padding: 32px 12px;
+  color: var(--color-text-faint);
+}
+
+.emptyState p {
+  margin: 4px 0 0;
+  font-size: 13.5px;
+  color: var(--color-text-muted);
+  font-weight: 600;
+}
+
+.emptyState span {
+  font-size: 12px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skeletonItem {
+    animation: none;
+  }
 }

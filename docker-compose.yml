@@ -1,6 +1,20 @@
+# --- Scaling notes (target: tens of concurrent users) ------------------
+#
+# UVICORN_WORKERS/DB_POOL_SIZE/DB_MAX_OVERFLOW below are deliberate, documented
+# choices, not accidental defaults -- re-measure with a load test (see the
+# `hey`/`wrk` example under the backend service) rather than trusting these
+# blindly on a different host. Explicitly OUT of scope at this target and
+# deferred to the next stage if load grows beyond "tens of concurrent users":
+# an async SQLAlchemy driver, horizontal autoscaling/Kubernetes, PgBouncer, and
+# a message/job queue.
 services:
   postgres:
     image: postgres:16-alpine
+    # Headroom for `--workers * (DB_POOL_SIZE + DB_MAX_OVERFLOW)` from the
+    # backend (up to 4*20=80 at the defaults below) plus Alembic/psql/the
+    # ops_admin (app_ops) connections -- default (100) leaves too little
+    # margin once multiple backend workers are actually running.
+    command: postgres -c max_connections=200
     environment:
       POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
@@ -14,6 +28,11 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
 
   keycloak:
     image: quay.io/keycloak/keycloak:24.0
@@ -29,6 +48,17 @@ services:
       - ./keycloak/realm-export.json:/opt/keycloak/data/import/realm-export.json:ro
     ports:
       - "127.0.0.1:8080:8080"
+    healthcheck:
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/localhost/8080 && echo -e 'GET /realms/chatgpt-proxy-dev HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q 'HTTP/1.1 200' <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
 
   ollama:
     image: ollama/ollama:latest
@@ -36,6 +66,17 @@ services:
       - "127.0.0.1:11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:11434/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "4"
+          memory: 8g
 
   backend:
     build: ./backend
@@ -45,6 +86,11 @@ services:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       MASTER_KEY_PATH: /run/secrets/master_key
       APP_RUNTIME_PASSWORD: ${APP_RUNTIME_PASSWORD}
+      # Not used directly by the backend app itself -- required because
+      # migration 0007 (run by this container's `alembic upgrade head`)
+      # provisions the app_ops role with this password, and Settings is shared
+      # between the app and the Alembic env.
+      APP_OPS_PASSWORD: ${APP_OPS_PASSWORD}
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-["http://localhost:3000"]}
       KEYCLOAK_ISSUER_URL: http://localhost:8080/realms/chatgpt-proxy-dev
       KEYCLOAK_JWKS_URL: http://keycloak:8080/realms/chatgpt-proxy-dev/protocol/openid-connect/certs
@@ -59,14 +105,74 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
       OUTPUT_GUARD_ENABLED: ${OUTPUT_GUARD_ENABLED:-true}
+      UVICORN_WORKERS: ${UVICORN_WORKERS:-4}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-10}
+      DB_MAX_OVERFLOW: ${DB_MAX_OVERFLOW:-10}
+      DB_POOL_TIMEOUT: ${DB_POOL_TIMEOUT:-30}
     secrets:
       - master_key
-    ports:
-      - "127.0.0.1:8000:8000"
+    # No published port here in the base file -- reached only through Traefik
+    # (see the traefik service below). docker-compose.override.yml (dev
+    # convenience, auto-applied by plain `docker compose up`) publishes
+    # 127.0.0.1:8000 directly so local dev is unaffected.
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.backend.rule=Host(`${PUBLIC_HOST:-localhost}`) && PathPrefix(`/api`, `/health`)"
+      - "traefik.http.routers.backend.entrypoints=websecure"
+      # Self-signed by default (works with no public DNS, e.g. this local
+      # deployment) -- swap for `traefik.http.routers.backend.tls.certresolver=letsencrypt`
+      # once PUBLIC_HOST is a real, publicly-resolvable hostname.
+      - "traefik.http.routers.backend.tls=true"
+      - "traefik.http.services.backend.loadbalancer.server.port=8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
     depends_on:
       postgres:
         condition: service_healthy
       keycloak:
+        condition: service_started
+
+  # Internal-only: manages the app catalog + per-tenant entitlements via
+  # Django's admin board. Deliberately bound to 127.0.0.1 only and never given
+  # Traefik labels (see the reverse-proxy section below) -- reachable only via
+  # an SSH tunnel to the docker host, never through the public entry point.
+  ops_admin:
+    build: ./ops_admin
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      POSTGRES_DB: ${POSTGRES_DB}
+      APP_OPS_PASSWORD: ${APP_OPS_PASSWORD}
+    ports:
+      - "127.0.0.1:8090:8000"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/admin/login/', timeout=3)"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+    depends_on:
+      postgres:
+        condition: service_healthy
+      backend:
+        # app_ops's grants and the apps/tenant_app_entitlements tables are
+        # created by the backend's Alembic migrations (0007) -- ops_admin's
+        # own `migrate` (Django's built-in apps only) can run any time after,
+        # but connecting before 0007 has run would fail on a missing role.
         condition: service_started
 
   frontend:
@@ -77,16 +183,66 @@ services:
       KEYCLOAK_CLIENT_ID: chatgpt-proxy-frontend
       KEYCLOAK_ISSUER: http://localhost:8080/realms/chatgpt-proxy-dev
       KEYCLOAK_INTERNAL_URL: http://keycloak:8080/realms/chatgpt-proxy-dev
-      NEXT_PUBLIC_API_BASE_URL: http://localhost:8000
-    ports:
-      - "127.0.0.1:${FRONTEND_PORT:-3000}:3000"
+      # Browser-facing: through Traefik (this base file, no direct backend
+      # port) at /api on the same public host. docker-compose.override.yml
+      # points this back at http://localhost:8000 directly for local dev.
+      NEXT_PUBLIC_API_BASE_URL: https://${PUBLIC_HOST:-localhost}
+    # No published port in the base file -- see the backend service's comment
+    # above; same Traefik-only convention, restored for dev in the override.
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.frontend.rule=Host(`${PUBLIC_HOST:-localhost}`)"
+      - "traefik.http.routers.frontend.entrypoints=websecure"
+      - "traefik.http.routers.frontend.tls=true"
+      - "traefik.http.services.frontend.loadbalancer.server.port=3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000', r => process.exit(r.statusCode < 500 ? 0 : 1)).on('error', () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2g
     depends_on:
       - backend
       - keycloak
 
+  # Public entry point (Feature B): TLS termination + routing to backend/
+  # frontend by Host+PathPrefix (labels above). Self-signed by default (see
+  # each service's tls label) so this works with no public DNS; the
+  # certificatesresolver below is configured but unused until a router label
+  # is switched to `tls.certresolver=letsencrypt` with a real PUBLIC_HOST.
+  # postgres, keycloak, ollama, and ops_admin are deliberately given no
+  # Traefik labels -- ops_admin especially must stay unreachable from here.
+  traefik:
+    image: traefik:v3.1
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--entrypoints.web.address=:80"
+      - "--entrypoints.websecure.address=:443"
+      - "--certificatesresolvers.letsencrypt.acme.tlschallenge=true"
+      - "--certificatesresolvers.letsencrypt.acme.email=${ACME_EMAIL:-admin@example.com}"
+      - "--certificatesresolvers.letsencrypt.acme.storage=/letsencrypt/acme.json"
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - traefik_letsencrypt:/letsencrypt
+    deploy:
+      resources:
+        limits:
+          cpus: "1"
+          memory: 512m
+
 volumes:
   postgres_data:
   ollama_data:
+  traefik_letsencrypt:
 
 secrets:
   master_key:

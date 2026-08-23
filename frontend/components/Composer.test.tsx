@@ -43,6 +43,6 @@ describe("Composer", () => {
     render(<Composer onSend={() => {}} disabled={true} />);
 
     expect(screen.getByPlaceholderText("Nachricht eingeben…")).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Send" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Senden" })).toBeDisabled();
   });
 });

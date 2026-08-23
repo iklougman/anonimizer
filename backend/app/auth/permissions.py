@@ -31,6 +31,7 @@ class Permission(StrEnum):
     ADMIN_USERS_MANAGE = "admin:users:manage"
     ADMIN_BRANCHES_MANAGE = "admin:branches:manage"
     ADMIN_PERMISSIONS_MANAGE = "admin:permissions:manage"
+    ADMIN_APPS_MANAGE = "admin:apps:manage"
 
 
 # Only these roles/permissions appear in the admin matrix UI; the rest are structural.

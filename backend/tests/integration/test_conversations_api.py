@@ -15,6 +15,7 @@ from app.db.session import SessionLocal, tenant_scoped_session
 from app.main import app
 from app.privacy_gateway.pipeline import get_pipeline
 from app.privacy_gateway.token_vault.key_provider import FileSecretKeyProvider
+from tests.conftest import grant_app_entitlement, revoke_app_entitlement
 
 
 @pytest.fixture
@@ -30,6 +31,7 @@ def scope():
         )
         session.commit()
         tenant_id = tenant.id
+    grant_app_entitlement(tenant_id)
     with tenant_scoped_session(tenant_id) as session:
         user = UserRepository(session).create(
             tenant_id, keycloak_subject="sub-1", email="doc@example.com", role="doctor"
@@ -51,6 +53,16 @@ def client(scope):
     )
     yield TestClient(app)
     app.dependency_overrides.pop(get_current_user, None)
+
+
+def test_create_conversation_is_403_once_the_app_entitlement_is_revoked(scope, client):
+    tenant_id, _ = scope
+    revoke_app_entitlement(tenant_id)
+    try:
+        response = client.post("/api/conversations")
+        assert response.status_code == 403
+    finally:
+        grant_app_entitlement(tenant_id)
 
 
 def test_create_and_list_conversations(client):

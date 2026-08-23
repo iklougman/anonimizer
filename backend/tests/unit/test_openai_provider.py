@@ -8,6 +8,8 @@ from app.llm_gateway.openai_provider import OpenAIProvider, OpenAIProviderError
 from app.llm_gateway.provider import (
     ChatMessage,
     LLMProviderError,
+    StreamDelta,
+    StreamUsage,
     TOKEN_PRESERVATION_SYSTEM_PROMPT,
 )
 
@@ -23,47 +25,47 @@ def _single_user_prompt(prompt: str) -> list[ChatMessage]:
     ]
 
 
-def test_complete_returns_text_tokens_and_a_computed_cost():
+def _sse_response(*chunks: dict, status_code: int = 200) -> httpx.Response:
+    body = "".join(f"data: {json.dumps(chunk)}\n\n" for chunk in chunks) + "data: [DONE]\n\n"
+    return httpx.Response(status_code, content=body.encode(), headers={"content-type": "text/event-stream"})
+
+
+def _collect(items):
+    items = list(items)
+    deltas = [item.text for item in items if isinstance(item, StreamDelta)]
+    usages = [item for item in items if isinstance(item, StreamUsage)]
+    assert len(usages) == 1
+    return deltas, usages[0]
+
+
+def test_stream_yields_deltas_then_a_final_usage_with_a_computed_cost():
     def handler(request: httpx.Request) -> httpx.Response:
         assert request.headers["authorization"] == "Bearer sk-test"
-        return httpx.Response(
-            200,
-            json={
-                "choices": [{"message": {"content": "Guten Tag."}}],
-                "usage": {"prompt_tokens": 1000, "completion_tokens": 1000},
-            },
+        return _sse_response(
+            {"choices": [{"delta": {"content": "Guten "}}]},
+            {"choices": [{"delta": {"content": "Tag."}}]},
+            {"choices": [], "usage": {"prompt_tokens": 1000, "completion_tokens": 1000}},
         )
 
-    provider = OpenAIProvider(
-        api_key="sk-test", model="gpt-4o-mini", http_client=_client(handler)
-    )
+    provider = OpenAIProvider(api_key="sk-test", model="gpt-4o-mini", http_client=_client(handler))
+    deltas, usage = _collect(provider.stream(_single_user_prompt("Hallo")))
 
-    completion = provider.complete(_single_user_prompt("Hallo"))
-
-    assert completion.text == "Guten Tag."
-    assert completion.tokens_in == 1000
-    assert completion.tokens_out == 1000
+    assert deltas == ["Guten ", "Tag."]
+    assert usage.tokens_in == 1000
+    assert usage.tokens_out == 1000
     # 1000 prompt tokens @ $0.00015/1K + 1000 completion tokens @ $0.0006/1K
-    assert completion.cost_usd == decimal.Decimal("0.00015") + decimal.Decimal("0.0006")
+    assert usage.cost_usd == decimal.Decimal("0.00015") + decimal.Decimal("0.0006")
 
 
-def test_sends_the_configured_model_and_the_message_list_verbatim():
+def test_sends_stream_true_the_configured_model_and_the_message_list_verbatim():
     captured = {}
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["body"] = json.loads(request.content)
-        return httpx.Response(
-            200,
-            json={
-                "choices": [{"message": {"content": "ok"}}],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
-            },
-        )
+        return _sse_response({"choices": [{"delta": {"content": "ok"}}]})
 
-    provider = OpenAIProvider(
-        api_key="sk-test", model="gpt-4o-mini", http_client=_client(handler)
-    )
-    provider.complete(_single_user_prompt("Hallo"))
+    provider = OpenAIProvider(api_key="sk-test", model="gpt-4o-mini", http_client=_client(handler))
+    list(provider.stream(_single_user_prompt("Hallo")))
 
     assert captured["body"] == {
         "model": "gpt-4o-mini",
@@ -71,6 +73,8 @@ def test_sends_the_configured_model_and_the_message_list_verbatim():
             {"role": "system", "content": TOKEN_PRESERVATION_SYSTEM_PROMPT},
             {"role": "user", "content": "Hallo"},
         ],
+        "stream": True,
+        "stream_options": {"include_usage": True},
     }
 
 
@@ -79,24 +83,18 @@ def test_passes_a_multi_message_history_through_verbatim():
 
     def handler(request: httpx.Request) -> httpx.Response:
         captured["body"] = json.loads(request.content)
-        return httpx.Response(
-            200,
-            json={
-                "choices": [{"message": {"content": "ok"}}],
-                "usage": {"prompt_tokens": 1, "completion_tokens": 1},
-            },
-        )
+        return _sse_response({"choices": [{"delta": {"content": "ok"}}]})
 
-    provider = OpenAIProvider(
-        api_key="sk-test", model="gpt-4o-mini", http_client=_client(handler)
-    )
-    provider.complete(
-        [
-            ChatMessage(role="system", content="sys"),
-            ChatMessage(role="user", content="erste Frage."),
-            ChatMessage(role="assistant", content="erste Antwort."),
-            ChatMessage(role="user", content="zweite Frage."),
-        ]
+    provider = OpenAIProvider(api_key="sk-test", model="gpt-4o-mini", http_client=_client(handler))
+    list(
+        provider.stream(
+            [
+                ChatMessage(role="system", content="sys"),
+                ChatMessage(role="user", content="erste Frage."),
+                ChatMessage(role="assistant", content="erste Antwort."),
+                ChatMessage(role="user", content="zweite Frage."),
+            ]
+        )
     )
 
     assert captured["body"]["messages"] == [
@@ -109,37 +107,37 @@ def test_passes_a_multi_message_history_through_verbatim():
 
 def test_gpt_5_nano_cost_is_computed_correctly():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "choices": [{"message": {"content": "ok"}}],
-                "usage": {"prompt_tokens": 1000, "completion_tokens": 1000},
-            },
+        return _sse_response(
+            {"choices": [{"delta": {"content": "ok"}}]},
+            {"choices": [], "usage": {"prompt_tokens": 1000, "completion_tokens": 1000}},
         )
 
-    provider = OpenAIProvider(
-        api_key="sk-test", model="gpt-5-nano", http_client=_client(handler)
-    )
-    completion = provider.complete(_single_user_prompt("Hallo"))
+    provider = OpenAIProvider(api_key="sk-test", model="gpt-5-nano", http_client=_client(handler))
+    _, usage = _collect(provider.stream(_single_user_prompt("Hallo")))
     # 1000 prompt tokens @ $0.00005/1K + 1000 completion tokens @ $0.0004/1K
-    assert completion.cost_usd == decimal.Decimal("0.00005") + decimal.Decimal("0.0004")
+    assert usage.cost_usd == decimal.Decimal("0.00005") + decimal.Decimal("0.0004")
 
 
 def test_unknown_model_costs_zero_rather_than_raising():
     def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(
-            200,
-            json={
-                "choices": [{"message": {"content": "ok"}}],
-                "usage": {"prompt_tokens": 1000, "completion_tokens": 1000},
-            },
+        return _sse_response(
+            {"choices": [{"delta": {"content": "ok"}}]},
+            {"choices": [], "usage": {"prompt_tokens": 1000, "completion_tokens": 1000}},
         )
 
-    provider = OpenAIProvider(
-        api_key="sk-test", model="some-future-model", http_client=_client(handler)
-    )
-    completion = provider.complete(_single_user_prompt("Hallo"))
-    assert completion.cost_usd == decimal.Decimal("0")
+    provider = OpenAIProvider(api_key="sk-test", model="some-future-model", http_client=_client(handler))
+    _, usage = _collect(provider.stream(_single_user_prompt("Hallo")))
+    assert usage.cost_usd == decimal.Decimal("0")
+
+
+def test_missing_usage_defaults_to_zero_tokens():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return _sse_response({"choices": [{"delta": {"content": "ok"}}]})
+
+    provider = OpenAIProvider(api_key="sk-test", model="gpt-4o-mini", http_client=_client(handler))
+    _, usage = _collect(provider.stream(_single_user_prompt("Hallo")))
+    assert usage.tokens_in == 0
+    assert usage.tokens_out == 0
 
 
 def test_transport_error_raises_openai_provider_error():
@@ -148,7 +146,7 @@ def test_transport_error_raises_openai_provider_error():
 
     provider = OpenAIProvider(api_key="sk-test", model="gpt-4o-mini", http_client=_client(handler))
     with pytest.raises(OpenAIProviderError):
-        provider.complete(_single_user_prompt("Hallo"))
+        list(provider.stream(_single_user_prompt("Hallo")))
 
 
 def test_http_status_error_message_includes_the_response_body():
@@ -160,16 +158,7 @@ def test_http_status_error_message_includes_the_response_body():
 
     provider = OpenAIProvider(api_key="sk-test", model="gpt-5-nano", http_client=_client(handler))
     with pytest.raises(OpenAIProviderError, match="unsupported_value"):
-        provider.complete(_single_user_prompt("Hallo"))
-
-
-def test_missing_expected_fields_raises_openai_provider_error():
-    def handler(request: httpx.Request) -> httpx.Response:
-        return httpx.Response(200, json={"unexpected": "shape"})
-
-    provider = OpenAIProvider(api_key="sk-test", model="gpt-4o-mini", http_client=_client(handler))
-    with pytest.raises(OpenAIProviderError):
-        provider.complete(_single_user_prompt("Hallo"))
+        list(provider.stream(_single_user_prompt("Hallo")))
 
 
 def test_openai_provider_error_is_an_llm_provider_error():

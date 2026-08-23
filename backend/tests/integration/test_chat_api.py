@@ -14,7 +14,7 @@ from app.db.repositories.conversation_repository import ConversationRepository
 from app.db.repositories.tenant_repository import TenantRepository
 from app.db.repositories.user_repository import UserRepository
 from app.db.session import SessionLocal, tenant_scoped_session
-from app.llm_gateway.provider import ChatMessage, LLMCompletion, LLMProviderError
+from app.llm_gateway.provider import ChatMessage, LLMProviderError, StreamDelta, StreamUsage
 from app.llm_gateway.registry import get_provider
 from app.main import app
 from app.models import LLMRequest, Message
@@ -29,6 +29,7 @@ from app.privacy_gateway.pseudonymization.pseudonymizer import Pseudonymizer
 from app.privacy_gateway.risk_scoring.scorer import RiskScorer
 from app.privacy_gateway.token_vault.key_provider import FileSecretKeyProvider
 from app.privacy_gateway.token_vault.vault import TokenVault
+from tests.conftest import grant_app_entitlement
 
 
 class _StubProvider:
@@ -40,13 +41,17 @@ class _StubProvider:
         self._error = error
         self.captured_messages: list[list[ChatMessage]] = []
 
-    def complete(self, messages: list[ChatMessage]) -> LLMCompletion:
+    def stream(self, messages: list[ChatMessage]):
         if self._error is not None:
             raise self._error
         self.captured_messages.append(list(messages))
-        return LLMCompletion(
-            text=self._response_text, tokens_in=10, tokens_out=10, cost_usd=decimal.Decimal("0")
-        )
+        # Split on whitespace (keeping it, so the concatenated deltas exactly
+        # reproduce response_text) to exercise multi-chunk assembly rather
+        # than a single one-shot delta.
+        words = self._response_text.split(" ")
+        for i, word in enumerate(words):
+            yield StreamDelta(text=word if i == len(words) - 1 else word + " ")
+        yield StreamUsage(tokens_in=10, tokens_out=10, cost_usd=decimal.Decimal("0"))
 
 
 @pytest.fixture
@@ -63,6 +68,7 @@ def scope():
         )
         session.commit()
         tenant_id = tenant.id
+    grant_app_entitlement(tenant_id)
     with tenant_scoped_session(tenant_id) as session:
         user = UserRepository(session).create(
             tenant_id, keycloak_subject="sub-1", email="doc@example.com", role="doctor"
@@ -95,6 +101,16 @@ def _clear_provider_override() -> None:
     app.dependency_overrides.pop(get_provider, None)
 
 
+def _sse_events(response) -> list[str]:
+    return [line for line in response.text.split("\n\n") if line.strip()]
+
+
+def _token_deltas(events: list[str]) -> str:
+    return "".join(
+        json.loads(line.split("data: ", 1)[1])["delta"] for line in events if line.startswith("event: token")
+    )
+
+
 def test_send_message_streams_the_validated_response(scope, authenticated):
     tenant_id, user_id, conversation_id = scope
     _use_provider(_StubProvider(response_text="Das klingt nach einer guten Genesung."))
@@ -106,13 +122,8 @@ def test_send_message_streams_the_validated_response(scope, authenticated):
 
     assert response.status_code == 200
     assert response.headers["content-type"].startswith("text/event-stream")
-    events = [line for line in response.text.split("\n\n") if line.strip()]
-    deltas = "".join(
-        json.loads(line.split("data: ", 1)[1])["delta"]
-        for line in events
-        if line.startswith("event: token")
-    )
-    assert deltas == "Das klingt nach einer guten Genesung."
+    events = _sse_events(response)
+    assert _token_deltas(events) == "Das klingt nach einer guten Genesung."
     assert any(line.startswith("event: done") for line in events)
 
     with tenant_scoped_session(tenant_id) as session:
@@ -166,7 +177,12 @@ def test_high_risk_message_is_rejected_with_422(scope, authenticated, tmp_path):
     _clear_provider_override()
 
 
-def test_provider_failure_is_a_502_and_the_user_message_survives(scope, authenticated):
+def test_provider_failure_streams_an_error_event_and_the_user_message_survives(scope, authenticated):
+    """StreamingResponse commits HTTP 200 before the generator's first item is
+    produced, so a provider outage discovered mid-stream can no longer surface
+    as a non-200 status the way the old one-shot call could -- it's now always
+    an `event: error` frame on an otherwise-200 stream (a deliberate contract
+    change for real streaming)."""
     tenant_id, _, conversation_id = scope
     _use_provider(_StubProvider(error=LLMProviderError("provider is down")))
     client = TestClient(app)
@@ -175,7 +191,10 @@ def test_provider_failure_is_a_502_and_the_user_message_survives(scope, authenti
         f"/api/conversations/{conversation_id}/messages", json={"content": "Hallo."}
     )
 
-    assert response.status_code == 502
+    assert response.status_code == 200
+    events = _sse_events(response)
+    assert any(line.startswith("event: error") for line in events)
+    assert not any(line.startswith("event: done") for line in events)
 
     with tenant_scoped_session(tenant_id) as session:
         messages = session.execute(
@@ -187,7 +206,7 @@ def test_provider_failure_is_a_502_and_the_user_message_survives(scope, authenti
     _clear_provider_override()
 
 
-def test_leaked_response_is_a_500_and_is_audit_logged(scope, authenticated):
+def test_leaked_response_streams_an_error_event_and_is_audit_logged(scope, authenticated):
     tenant_id, _, conversation_id = scope
     _use_provider(_StubProvider(response_text="Der Patient heißt Anna Schmitt."))
     client = TestClient(app)
@@ -196,17 +215,26 @@ def test_leaked_response_is_a_500_and_is_audit_logged(scope, authenticated):
         f"/api/conversations/{conversation_id}/messages", json={"content": "Hallo."}
     )
 
-    assert response.status_code == 500
+    assert response.status_code == 200
+    events = _sse_events(response)
+    assert any(line.startswith("event: error") for line in events)
+    assert not any(line.startswith("event: done") for line in events)
 
     from app.models import AuditEvent
 
     with tenant_scoped_session(tenant_id) as session:
-        events = session.execute(
+        events_rows = session.execute(
             sa.select(AuditEvent).where(AuditEvent.conversation_id == conversation_id)
         ).scalars().all()
-        assert len(events) == 1
-        assert events[0].event_type == "LeakageDetectedError"
-        assert events[0].entity_type == "PATIENT"
+        assert len(events_rows) == 1
+        assert events_rows[0].event_type == "LeakageDetectedError"
+        assert events_rows[0].entity_type == "PATIENT"
+
+        # No assistant Message row -- the turn is not persisted on a guard failure.
+        messages = session.execute(
+            sa.select(Message).where(Message.conversation_id == conversation_id)
+        ).scalars().all()
+        assert {m.role for m in messages} == {"user"}
 
     _clear_provider_override()
 
