@@ -101,3 +101,32 @@ class PermissionMatrixOut(BaseModel):
 
 class PermissionMatrixIn(BaseModel):
     matrix: dict[str, dict[str, bool]]
+
+
+class AppAssignmentOut(BaseModel):
+    branch_id: uuid.UUID | None
+    branch_name: str | None
+    is_enabled: bool
+
+
+class AppOut(BaseModel):
+    id: uuid.UUID
+    key: str
+    name: str
+    description: str | None
+    is_entitled: bool
+    assignments: list[AppAssignmentOut]
+
+
+class AppAssignmentIn(BaseModel):
+    branch_id: uuid.UUID | None = None
+    is_enabled: bool
+
+
+class AvailableAppOut(BaseModel):
+    """Lean, non-admin shape: what an ordinary user (any role) can see about an
+    app they're entitled to use -- no id/is_entitled/assignments plumbing."""
+
+    key: str
+    name: str
+    description: str | None

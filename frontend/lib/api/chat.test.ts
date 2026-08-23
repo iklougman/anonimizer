@@ -37,6 +37,7 @@ describe("sendMessage", () => {
       onDone: (result) => {
         done = result;
       },
+      onError: () => {},
     });
 
     expect(deltas).toEqual(["Das klingt ", "gut."]);
@@ -55,6 +56,7 @@ describe("sendMessage", () => {
     await sendMessage("token-123", "conv-1", "Hallo", {
       onDelta: (delta) => deltas.push(delta),
       onDone: () => {},
+      onError: () => {},
     });
 
     expect(deltas).toEqual(["Hallo"]);
@@ -65,7 +67,7 @@ describe("sendMessage", () => {
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, body });
     vi.stubGlobal("fetch", fetchMock);
 
-    await sendMessage("token-123", "conv-1", "Hallo Welt", { onDelta: () => {}, onDone: () => {} });
+    await sendMessage("token-123", "conv-1", "Hallo Welt", { onDelta: () => {}, onDone: () => {}, onError: () => {} });
 
     expect(fetchMock).toHaveBeenCalledWith(
       "http://localhost:8000/api/conversations/conv-1/messages",
@@ -75,6 +77,32 @@ describe("sendMessage", () => {
         body: JSON.stringify({ content: "Hallo Welt" }),
       }
     );
+  });
+
+  it("calls onError (not onDone) on an event:error frame, without throwing", async () => {
+    const body = streamFromChunks([
+      'event: token\ndata: {"delta": "Teil "}\n\n',
+      'event: error\ndata: {"detail": "Sensitive information could not be safely processed."}\n\n',
+    ]);
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({ ok: true, body }));
+
+    const deltas: string[] = [];
+    let error: { detail: string } | undefined;
+    let done = false;
+
+    await sendMessage("token-123", "conv-1", "Hallo", {
+      onDelta: (delta) => deltas.push(delta),
+      onDone: () => {
+        done = true;
+      },
+      onError: (err) => {
+        error = err;
+      },
+    });
+
+    expect(deltas).toEqual(["Teil "]);
+    expect(error).toEqual({ detail: "Sensitive information could not be safely processed." });
+    expect(done).toBe(false);
   });
 
   it("throws a ChatApiError with the backend detail on a 422", async () => {
@@ -88,7 +116,7 @@ describe("sendMessage", () => {
     );
 
     await expect(
-      sendMessage("token-123", "conv-1", "risky message", { onDelta: () => {}, onDone: () => {} })
+      sendMessage("token-123", "conv-1", "risky message", { onDelta: () => {}, onDone: () => {}, onError: () => {} })
     ).rejects.toMatchObject({
       status: 422,
       message: "Sensitive information could not be safely processed.",
@@ -108,7 +136,7 @@ describe("sendMessage", () => {
     );
 
     await expect(
-      sendMessage("token-123", "conv-1", "hi", { onDelta: () => {}, onDone: () => {} })
+      sendMessage("token-123", "conv-1", "hi", { onDelta: () => {}, onDone: () => {}, onError: () => {} })
     ).rejects.toMatchObject({ status: 502, message: "Something went wrong. Try again." });
   });
 
@@ -119,7 +147,7 @@ describe("sendMessage", () => {
     );
 
     await expect(
-      sendMessage("token-123", "conv-1", "hi", { onDelta: () => {}, onDone: () => {} })
+      sendMessage("token-123", "conv-1", "hi", { onDelta: () => {}, onDone: () => {}, onError: () => {} })
     ).rejects.toBeInstanceOf(ChatApiError);
   });
 });

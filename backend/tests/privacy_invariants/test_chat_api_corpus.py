@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 from app.auth.dependencies import get_current_user
 from app.auth.permissions import DEFAULT_PERMISSIONS
 from app.auth.tenant_resolver import AuthenticatedUser
-from app.llm_gateway.provider import ChatMessage, LLMCompletion
+from app.llm_gateway.provider import ChatMessage, StreamDelta, StreamUsage
 from app.llm_gateway.registry import get_provider
 from app.main import app
 from app.privacy_gateway.pipeline import get_pipeline
@@ -25,15 +25,14 @@ class _RecordingProvider:
     def __init__(self) -> None:
         self.captured_prompts: list[str] = []
 
-    def complete(self, messages: list[ChatMessage]) -> LLMCompletion:
+    def stream(self, messages: list[ChatMessage]):
         # Join all non-system messages into a single string so the existing
         # raw-PII-leak assertion (which scans captured_prompts for entity text)
         # keeps working unchanged -- it does not care about message boundaries,
         # only whether any raw PII reached the provider at all.
         self.captured_prompts.append(" ".join(m.content for m in messages if m.role != "system"))
-        return LLMCompletion(
-            text="Verstanden.", tokens_in=1, tokens_out=1, cost_usd=decimal.Decimal("0")
-        )
+        yield StreamDelta(text="Verstanden.")
+        yield StreamUsage(tokens_in=1, tokens_out=1, cost_usd=decimal.Decimal("0"))
 
 
 @pytest.mark.parametrize("note", SANITIZABLE, ids=lambda note: note["id"])

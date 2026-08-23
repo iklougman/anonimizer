@@ -16,6 +16,7 @@ from app.auth.tenant_resolver import (
     resolve_authenticated_user,
 )
 from app.config import get_settings
+from app.db.repositories.app_entitlement_repository import AppEntitlementRepository
 from app.db.session import tenant_scoped_session
 from app.keycloak_admin.client import KeycloakAdminClient
 
@@ -74,6 +75,30 @@ def require_permission(permission: Permission):
     def _check(user: AuthenticatedUser = Depends(get_current_user)) -> AuthenticatedUser:
         if permission not in user.permissions:
             raise HTTPException(status_code=403, detail="insufficient permissions")
+        return user
+
+    return _check
+
+
+def require_app_entitlement(app_key: str):
+    """Dependency factory gating an endpoint on the tenant being entitled to
+    (ops-granted) and having enabled (tenant-admin-assigned) a given app.
+
+    Shaped like `require_permission` so it composes identically in an endpoint
+    signature, but checked separately since it's not a role/permission
+    question -- it's "is this tenant subscribed to this app at all".
+    """
+
+    def _check(
+        user: AuthenticatedUser = Depends(get_current_user),
+        session: Session = Depends(get_db_session),
+    ) -> AuthenticatedUser:
+        if not AppEntitlementRepository(session).is_entitled_and_assigned(
+            user.tenant_id, app_key, user.branch_id
+        ):
+            raise HTTPException(
+                status_code=403, detail=f"tenant is not entitled to the '{app_key}' app"
+            )
         return user
 
     return _check

@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import decimal
+import json
+from collections.abc import Iterator
 
 import httpx
 
 from app.llm_gateway.provider import (
     ChatMessage,
-    LLMCompletion,
     LLMProviderError,
     SANITIZED_PROMPT_TEMPERATURE,
+    StreamDelta,
+    StreamUsage,
 )
 
 
@@ -26,9 +29,11 @@ class OllamaProvider:
         self._base_url = base_url.rstrip("/")
         self._http_client = http_client if http_client is not None else httpx.Client(timeout=120.0)
 
-    def complete(self, messages: list[ChatMessage]) -> LLMCompletion:
+    def stream(self, messages: list[ChatMessage]) -> Iterator[StreamDelta | StreamUsage]:
+        tokens_in = tokens_out = 0
         try:
-            response = self._http_client.post(
+            with self._http_client.stream(
+                "POST",
                 f"{self._base_url}/api/chat",
                 json={
                     "model": self.model,
@@ -36,25 +41,28 @@ class OllamaProvider:
                         {"role": m.role, "content": m.content} for m in messages
                     ],
                     "options": {"temperature": SANITIZED_PROMPT_TEMPERATURE},
-                    "stream": False,
+                    "stream": True,
                 },
-            )
-            response.raise_for_status()
+            ) as response:
+                response.raise_for_status()
+                # Ollama's /api/chat streams newline-delimited JSON objects, not
+                # SSE `data:` framing (that's OpenAI's format -- see
+                # OpenAIProvider.stream()).
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+                    body = json.loads(line)
+                    content = (body.get("message") or {}).get("content")
+                    if content:
+                        yield StreamDelta(text=content)
+                    if body.get("done"):
+                        # Local inference has no metered $ cost; token counts are
+                        # best-effort (some models omit these fields), used only
+                        # for the research benchmark's utility metrics, never
+                        # for billing.
+                        tokens_in = body.get("prompt_eval_count", 0)
+                        tokens_out = body.get("eval_count", 0)
         except httpx.HTTPError as exc:
             raise OllamaProviderError(f"ollama request failed: {exc}") from exc
 
-        body = response.json()
-        # /api/chat returns {"message": {"role": "assistant", "content": "..."}}.
-        text = (body.get("message") or {}).get("content")
-        if text is None:
-            raise OllamaProviderError(f"ollama response missing message.content: {body}")
-
-        # Local inference has no metered $ cost; token counts are best-effort (some
-        # models omit eval_count/prompt_eval_count), used only for the research
-        # benchmark's utility metrics, never for billing.
-        return LLMCompletion(
-            text=text,
-            tokens_in=body.get("prompt_eval_count", 0),
-            tokens_out=body.get("eval_count", 0),
-            cost_usd=decimal.Decimal(0),
-        )
+        yield StreamUsage(tokens_in=tokens_in, tokens_out=tokens_out, cost_usd=decimal.Decimal(0))

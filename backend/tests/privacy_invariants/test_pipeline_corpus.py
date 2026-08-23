@@ -5,6 +5,7 @@ import pytest
 from app.privacy_gateway.pipeline import (
     HighRiskMessageError,
     LeakageDetectedError,
+    ResidualPIIError,
     UnresolvedTokenError,
 )
 from tests.privacy_invariants.conftest import load_golden_corpus, new_scope
@@ -36,6 +37,11 @@ KNOWN_RECALL_GAPS: set[tuple[str, str]] = {
 # the untouched prose as a PERSON. A precision gap, not a recall gap — nothing leaks,
 # but the message fails closed and never reaches the user. Same rule applies: the
 # corpus is never edited to hide one, and each entry records what the model produced.
+#
+# sanitize() itself now runs this identical mask-then-rescan check on its own output
+# before ever returning it (the pre-send integrity check, OutputGuard.assert_no_raw_pii)
+# rather than only the output guard catching it on the way back — so every note listed
+# here now fails closed inside sanitize() (ResidualPIIError), earlier than before.
 KNOWN_GUARD_FALSE_POSITIVES: dict[str, str] = {
     # note_014 is "… Versichertennummer C112233445. Patientennummer: 9012347." On the
     # raw note de_core_news_lg emits PER over "C112233445. Patientennummer", which the
@@ -58,7 +64,16 @@ def test_no_raw_pii_string_survives_sanitize(note, corpus_pipeline, corpus_scope
     """Design spec §7 / master spec §9: no raw golden-corpus PII string ever appears
     in sanitize()'s output, for every corpus example."""
     tenant_id, conversation_id = corpus_scope
-    sanitized = corpus_pipeline.sanitize(tenant_id, conversation_id, note["text"])
+
+    if note["id"] in KNOWN_GUARD_FALSE_POSITIVES:
+        # sanitize() fails closed before returning anything for this note (see
+        # KNOWN_GUARD_FALSE_POSITIVES) -- vacuously true that no raw PII "survives",
+        # pinned explicitly rather than skipped so a regression here is visible.
+        with pytest.raises(ResidualPIIError):
+            corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
+        return
+
+    sanitized = corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
 
     leaked = [
         entity["text"]
@@ -75,7 +90,13 @@ def test_no_raw_pii_string_survives_sanitize(note, corpus_pipeline, corpus_scope
 @pytest.mark.parametrize("note", SANITIZABLE, ids=lambda note: note["id"])
 def test_sanitize_emits_only_well_formed_tokens(note, corpus_pipeline, corpus_scope):
     tenant_id, conversation_id = corpus_scope
-    sanitized = corpus_pipeline.sanitize(tenant_id, conversation_id, note["text"])
+
+    if note["id"] in KNOWN_GUARD_FALSE_POSITIVES:
+        with pytest.raises(ResidualPIIError):
+            corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
+        return
+
+    sanitized = corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
     for token in TOKEN_PATTERN.findall(sanitized):
         assert token.rsplit("_", 1)[0].isupper()
 
@@ -83,23 +104,22 @@ def test_sanitize_emits_only_well_formed_tokens(note, corpus_pipeline, corpus_sc
 @pytest.mark.parametrize("note", SANITIZABLE, ids=lambda note: note["id"])
 def test_round_trip_restores_the_original_note(note, corpus_pipeline, corpus_scope):
     tenant_id, conversation_id = corpus_scope
-    sanitized = corpus_pipeline.sanitize(tenant_id, conversation_id, note["text"])
 
-    false_positive = KNOWN_GUARD_FALSE_POSITIVES.get(note["id"])
-    if false_positive is not None:
+    if note["id"] in KNOWN_GUARD_FALSE_POSITIVES:
         # Asserted, not skipped: the note fails closed on a documented model
         # precision gap, and this pins that behavior so that fixing the gap (or
-        # regressing further) shows up here rather than passing silently.
-        assert false_positive in sanitized
-        # Matched on the documented entity type, not just on the exception class: an
-        # unrelated — and genuinely worse — leak appearing in this note must fail
-        # here rather than pass under the comment above, which would then quietly
-        # stop being true.
-        with pytest.raises(LeakageDetectedError, match=r"\bPATIENT at\b"):
-            corpus_pipeline.deanonymize(tenant_id, conversation_id, sanitized)
+        # regressing further) shows up here rather than passing silently. sanitize()
+        # itself now runs the same mask-then-rescan check its own output would later
+        # hit in the output guard, so the fail-closed point is here, not at
+        # deanonymize() -- matched on the documented entity type, not just the
+        # exception class, so an unrelated -- and genuinely worse -- leak in this
+        # note fails here rather than passing under this comment.
+        with pytest.raises(ResidualPIIError, match=r"\bPATIENT at\b"):
+            corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
         return
 
-    restored = corpus_pipeline.deanonymize(tenant_id, conversation_id, sanitized)
+    sanitized = corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
+    restored = corpus_pipeline.deanonymize(tenant_id, "conversation", conversation_id, sanitized)
     assert restored == note["text"]
 
 
@@ -109,7 +129,7 @@ def test_the_combination_case_is_rejected_not_partially_sanitized(
 ):
     tenant_id, conversation_id = corpus_scope
     with pytest.raises(HighRiskMessageError) as excinfo:
-        corpus_pipeline.sanitize(tenant_id, conversation_id, note["text"])
+        corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
     for entity in note["entities"]:
         assert entity["text"] not in str(excinfo.value)
 
@@ -130,7 +150,7 @@ def test_the_coreference_limitation_leaves_the_salutation_form_untokenized(
     tenant_id, conversation_id = corpus_scope
     note = next(n for n in CORPUS if n["id"] == "note_012")
 
-    sanitized = corpus_pipeline.sanitize(tenant_id, conversation_id, note["text"])
+    sanitized = corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
     person_tokens = [
         token for token in TOKEN_PATTERN.findall(sanitized)
         if token.startswith(("PATIENT_", "PERSON_"))
@@ -154,7 +174,14 @@ def test_every_corpus_note_sanitizes_under_a_single_conversation(
     (tenant_id, conversation_id, token) unique constraint across many messages."""
     tenant_id, conversation_id = corpus_scope
     for note in SANITIZABLE:
-        sanitized = corpus_pipeline.sanitize(tenant_id, conversation_id, note["text"])
+        if note["id"] in KNOWN_GUARD_FALSE_POSITIVES:
+            # Fails closed before minting is even relevant to this note -- see
+            # KNOWN_GUARD_FALSE_POSITIVES -- but every other note in the same
+            # conversation must still mint cleanly around it.
+            with pytest.raises(ResidualPIIError):
+                corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
+            continue
+        sanitized = corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
         assert sanitized
 
 
@@ -165,10 +192,10 @@ def test_a_corpus_token_never_resolves_for_another_tenant(
     other_tenant_id, _ = new_scope(corpus_key_provider)
     note = next(n for n in SANITIZABLE if n["id"] == "note_001")
 
-    sanitized = corpus_pipeline.sanitize(tenant_id, conversation_id, note["text"])
+    sanitized = corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
 
     with pytest.raises(UnresolvedTokenError):
-        corpus_pipeline.deanonymize(other_tenant_id, conversation_id, sanitized)
+        corpus_pipeline.deanonymize(other_tenant_id, "conversation", conversation_id, sanitized)
 
 
 def test_a_corpus_token_never_resolves_for_another_conversation(
@@ -178,10 +205,10 @@ def test_a_corpus_token_never_resolves_for_another_conversation(
     _, other_conversation_id = new_scope(corpus_key_provider)
     note = next(n for n in SANITIZABLE if n["id"] == "note_001")
 
-    sanitized = corpus_pipeline.sanitize(tenant_id, conversation_id, note["text"])
+    sanitized = corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
 
     with pytest.raises(UnresolvedTokenError):
-        corpus_pipeline.deanonymize(tenant_id, other_conversation_id, sanitized)
+        corpus_pipeline.deanonymize(tenant_id, "conversation", other_conversation_id, sanitized)
 
 
 @pytest.mark.parametrize(
@@ -198,15 +225,15 @@ def test_raw_pii_in_llm_output_is_always_caught(
 ):
     tenant_id, conversation_id = corpus_scope
     with pytest.raises(LeakageDetectedError):
-        corpus_pipeline.deanonymize(tenant_id, conversation_id, leaked_output)
+        corpus_pipeline.deanonymize(tenant_id, "conversation", conversation_id, leaked_output)
 
 
 def test_a_token_mixed_with_leaked_pii_still_fails_closed(corpus_pipeline, corpus_scope):
     tenant_id, conversation_id = corpus_scope
     note = next(n for n in SANITIZABLE if n["id"] == "note_001")
-    sanitized = corpus_pipeline.sanitize(tenant_id, conversation_id, note["text"])
+    sanitized = corpus_pipeline.sanitize(tenant_id, "conversation", conversation_id, note["text"])
 
     with pytest.raises(LeakageDetectedError):
         corpus_pipeline.deanonymize(
-            tenant_id, conversation_id, sanitized + " Kontakt: A987654321."
+            tenant_id, "conversation", conversation_id, sanitized + " Kontakt: A987654321."
         )

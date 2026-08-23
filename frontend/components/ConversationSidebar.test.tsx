@@ -10,6 +10,7 @@ vi.mock("next-auth/react", () => ({
 const mockRouterPush = vi.fn();
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: mockRouterPush }),
+  usePathname: () => "/apps/anonymization",
 }));
 
 const mockUseMe = vi.fn();
@@ -66,7 +67,14 @@ describe("ConversationSidebar", () => {
 
     render(<ConversationSidebar />);
 
-    expect(await screen.findByText("Neue Anfrage")).toBeInTheDocument();
+    // Two matches once the conversation list has resolved: the "new
+    // conversation" button's own label, and this conversation's placeholder
+    // title -- both render the same string. Polled via waitFor (not
+    // findAllByText, which would resolve early on the button alone, before
+    // the async conversation list arrives).
+    await waitFor(() => {
+      expect(screen.getAllByText("Neue Anfrage")).toHaveLength(2);
+    });
   });
 
   it("creates a conversation and navigates to it", async () => {
@@ -77,9 +85,9 @@ describe("ConversationSidebar", () => {
     const user = userEvent.setup();
 
     render(<ConversationSidebar />);
-    await user.click(await screen.findByText("+ Neue Anfrage"));
+    await user.click(await screen.findByText("Neue Anfrage"));
 
-    await waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith("/c/new-1"));
+    await waitFor(() => expect(mockRouterPush).toHaveBeenCalledWith("/apps/anonymization/c/new-1"));
   });
 
   it("removes a conversation from the list after deleting it", async () => {
@@ -101,7 +109,7 @@ describe("ConversationSidebar", () => {
     render(<ConversationSidebar />);
 
     await waitFor(() => expect(conversationsApi.listConversations).toHaveBeenCalled());
-    expect(screen.queryByText("+ Neue Anfrage")).not.toBeInTheDocument();
+    expect(screen.queryByText("Neue Anfrage")).not.toBeInTheDocument();
   });
 
   it("shows an owner badge and hides delete for a shared conversation without delete:any", async () => {
@@ -118,27 +126,5 @@ describe("ConversationSidebar", () => {
 
     expect(await screen.findByText("colleague")).toBeInTheDocument();
     expect(screen.queryByLabelText("Delete Anfrage Patient A")).not.toBeInTheDocument();
-  });
-
-  it("shows the Verwaltung link when the user holds an admin permission", async () => {
-    mockUseMe.mockReturnValue({
-      ...ME_FULL_PERMISSIONS,
-      permissions: ["conversations:create", "admin:users:manage"],
-    });
-    vi.spyOn(conversationsApi, "listConversations").mockResolvedValue([]);
-
-    render(<ConversationSidebar />);
-
-    expect(await screen.findByText("Verwaltung")).toBeInTheDocument();
-  });
-
-  it("hides the Verwaltung link without any admin permission", async () => {
-    mockUseMe.mockReturnValue({ ...ME_FULL_PERMISSIONS, permissions: ["conversations:create"] });
-    vi.spyOn(conversationsApi, "listConversations").mockResolvedValue([]);
-
-    render(<ConversationSidebar />);
-
-    await waitFor(() => expect(conversationsApi.listConversations).toHaveBeenCalled());
-    expect(screen.queryByText("Verwaltung")).not.toBeInTheDocument();
   });
 });

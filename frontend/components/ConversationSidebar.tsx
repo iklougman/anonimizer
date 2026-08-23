@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type KeyboardEvent } from "react";
 import { signIn, useSession } from "next-auth/react";
-import { useRouter } from "next/navigation";
-import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
+import { IconMessage2, IconPlus, IconTrash } from "@tabler/icons-react";
 import {
   createConversation,
   deleteConversation,
@@ -13,17 +13,21 @@ import type { ConversationSummary } from "@/lib/api/types";
 import { useMe } from "@/components/MeProvider";
 import styles from "./ConversationSidebar.module.css";
 
-export function ConversationSidebar({ activeConversationId }: { activeConversationId?: string }) {
+export function ConversationSidebar() {
   const { data: session } = useSession();
   const router = useRouter();
+  const pathname = usePathname();
   const me = useMe();
-  const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+  const [conversations, setConversations] = useState<ConversationSummary[] | null>(null);
   const [loadError, setLoadError] = useState(false);
+  // No caller ever passed this as a prop (dead code before this fix) -- a
+  // Next.js layout has no access to the matched page's dynamic route params,
+  // so it has to be derived from the current path instead.
+  const activeConversationId = pathname.match(/^\/apps\/anonymization\/c\/([^/]+)/)?.[1];
   // While `me` is still loading, permission-gated controls stay hidden rather
   // than briefly flashing enabled -- fails closed on the loading state too.
   const canCreate = me?.permissions.includes("conversations:create") ?? false;
   const canDeleteAny = me?.permissions.includes("conversations:delete:any") ?? false;
-  const hasAdminAccess = me?.permissions.some((p) => p.startsWith("admin:")) ?? false;
 
   useEffect(() => {
     // A refresh failure (e.g. the Keycloak refresh token itself expired)
@@ -46,8 +50,8 @@ export function ConversationSidebar({ activeConversationId }: { activeConversati
     if (!session?.accessToken) return;
     try {
       const created = await createConversation(session.accessToken);
-      setConversations((current) => [created, ...current]);
-      router.push(`/c/${created.id}`);
+      setConversations((current) => [created, ...(current ?? [])]);
+      router.push(`/apps/anonymization/c/${created.id}`);
     } catch {
       setLoadError(true);
     }
@@ -57,12 +61,23 @@ export function ConversationSidebar({ activeConversationId }: { activeConversati
     if (!session?.accessToken) return;
     try {
       await deleteConversation(session.accessToken, conversationId);
-      setConversations((current) => current.filter((c) => c.id !== conversationId));
+      setConversations((current) => current?.filter((c) => c.id !== conversationId) ?? null);
       if (activeConversationId === conversationId) {
-        router.push("/");
+        router.push("/apps/anonymization");
       }
     } catch {
       setLoadError(true);
+    }
+  }
+
+  function goToConversation(conversationId: string) {
+    router.push(`/apps/anonymization/c/${conversationId}`);
+  }
+
+  function handleRowKeyDown(event: KeyboardEvent<HTMLDivElement>, conversationId: string) {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      goToConversation(conversationId);
     }
   }
 
@@ -70,7 +85,8 @@ export function ConversationSidebar({ activeConversationId }: { activeConversati
     <nav className={styles.sidebar}>
       {canCreate && (
         <button type="button" className={styles.newButton} onClick={handleCreate}>
-          + Neue Anfrage
+          <IconPlus size={16} stroke={2.5} />
+          Neue Anfrage
         </button>
       )}
       {loadError && (
@@ -91,18 +107,33 @@ export function ConversationSidebar({ activeConversationId }: { activeConversati
           </button>
         </div>
       )}
-      {conversations.map((conversation) => {
+      {conversations === null && !loadError && (
+        <div className={styles.skeletonList} aria-hidden="true">
+          <div className={styles.skeletonItem} />
+          <div className={styles.skeletonItem} />
+          <div className={styles.skeletonItem} />
+        </div>
+      )}
+      {conversations !== null && conversations.length === 0 && !loadError && (
+        <div className={styles.emptyState}>
+          <IconMessage2 size={28} stroke={1.5} />
+          <p>Noch keine Unterhaltungen.</p>
+          {canCreate && <span>Mit &quot;Neue Anfrage&quot; loslegen.</span>}
+        </div>
+      )}
+      {conversations?.map((conversation) => {
         const title = conversation.title ?? "Neue Anfrage";
         const canDelete = conversation.is_own || canDeleteAny;
+        const isActive = conversation.id === activeConversationId;
         return (
           <div
             key={conversation.id}
-            className={
-              conversation.id === activeConversationId
-                ? `${styles.conversationItem} ${styles.conversationItemActive}`
-                : styles.conversationItem
-            }
-            onClick={() => router.push(`/c/${conversation.id}`)}
+            role="button"
+            tabIndex={0}
+            aria-current={isActive || undefined}
+            className={isActive ? `${styles.conversationItem} ${styles.conversationItemActive}` : styles.conversationItem}
+            onClick={() => goToConversation(conversation.id)}
+            onKeyDown={(event) => handleRowKeyDown(event, conversation.id)}
           >
             <span className={styles.conversationTitle}>{title}</span>
             {!conversation.is_own && (
@@ -118,17 +149,12 @@ export function ConversationSidebar({ activeConversationId }: { activeConversati
                   handleDelete(conversation.id, title);
                 }}
               >
-                ×
+                <IconTrash size={14} stroke={1.75} />
               </button>
             )}
           </div>
         );
       })}
-      {hasAdminAccess && (
-        <Link href="/admin" className={styles.adminLink}>
-          Verwaltung
-        </Link>
-      )}
     </nav>
   );
 }

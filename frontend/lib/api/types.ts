@@ -56,3 +56,26 @@ export interface PermissionMatrix {
   defaults: Record<string, string[]>;
   matrix: Record<string, Record<string, boolean>>;
 }
+
+export interface AppAssignment {
+  branch_id: string | null;
+  branch_name: string | null;
+  is_enabled: boolean;
+}
+
+export interface App {
+  id: string;
+  key: string;
+  name: string;
+  description: string | null;
+  is_entitled: boolean;
+  assignments: AppAssignment[];
+}
+
+/** Lean, non-admin shape from GET /api/apps: what an ordinary user can see
+ * about an app they're already entitled+enabled to use. */
+export interface AvailableApp {
+  key: string;
+  name: string;
+  description: string | null;
+}

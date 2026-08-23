@@ -1,4 +1,3 @@
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -6,11 +5,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.admin import router as admin_router
+from app.api.admin_apps import router as admin_apps_router
+from app.api.apps import router as apps_router
 from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.health import router as health_router
 from app.api.me import router as me_router
 from app.config import get_settings
+from app.logging_config import configure_logging
 from app.privacy_gateway.pipeline import get_pipeline
 
 settings = get_settings()
@@ -18,11 +20,10 @@ settings = get_settings()
 # LOG_LEVEL was previously read into Settings but nothing configured Python's
 # logging module with it, so app.*.info()/warning() calls (the privacy
 # pipeline's step-by-step decision log) were silently dropped. This makes the
-# setting do what its name says.
-logging.basicConfig(
-    level=settings.log_level,
-    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-)
+# setting do what its name says. Colorized outside production: docker logs
+# renders the ANSI codes fine, but a production log aggregator would just show
+# the raw escape bytes as noise.
+configure_logging(settings.log_level, colorize=settings.environment != "production")
 
 
 @asynccontextmanager
@@ -52,6 +53,8 @@ if settings.cors_allowed_origins:
 
 app.include_router(health_router)
 app.include_router(me_router)
+app.include_router(apps_router)
 app.include_router(admin_router)
+app.include_router(admin_apps_router)
 app.include_router(conversations_router)
 app.include_router(chat_router)
