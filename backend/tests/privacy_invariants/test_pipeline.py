@@ -199,33 +199,6 @@ def test_sanitize_fails_closed_if_pseudonymization_leaves_pii_behind(
         )
 
 
-class _NoOpPseudonymizer:
-    """Stands in for a Pseudonymizer.apply() that failed to substitute anything --
-    simulates the exact bug assert_no_raw_pii exists to catch, so sanitize() must
-    fail closed on its own output rather than forward it to an LLM."""
-
-    def apply(self, tenant_id, conversation_id, text, spans):
-        return text
-
-
-def test_sanitize_fails_closed_if_pseudonymization_leaves_pii_behind(
-    scope, detector_stack, key_provider
-):
-    tenant_id, conversation_id = scope
-    vault = TokenVault(key_provider)
-    broken_pipeline = Pipeline(
-        detector_stack=detector_stack,
-        risk_scorer=RiskScorer(DISEASES),
-        pseudonymizer=_NoOpPseudonymizer(),
-        output_guard=OutputGuard(detector_stack, vault),
-    )
-
-    with pytest.raises(ResidualPIIError):
-        broken_pipeline.sanitize(
-            tenant_id, conversation_id, "Patient Lukas Berger wurde aufgenommen."
-        )
-
-
 def test_sanitized_output_contains_only_well_formed_tokens(scope, pipeline):
     tenant_id, conversation_id = scope
     sanitized = pipeline.sanitize(
