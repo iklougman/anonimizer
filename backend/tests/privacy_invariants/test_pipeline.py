@@ -90,7 +90,7 @@ def test_sanitize_removes_every_identifier(scope, pipeline):
         "im Universitätsklinikum Heidelberg von Dr. Anna Schmitt aufgenommen."
     )
 
-    sanitized = pipeline.sanitize(tenant_id, conversation_id, text)
+    sanitized = pipeline.sanitize(tenant_id, "conversation", conversation_id, text)
 
     for raw in ("Lukas Berger", "A123456789", "12.03.2024",
                 "Universitätsklinikum Heidelberg", "Anna Schmitt"):
@@ -100,7 +100,7 @@ def test_sanitize_removes_every_identifier(scope, pipeline):
 def test_sanitize_keeps_the_non_identifying_text(scope, pipeline):
     tenant_id, conversation_id = scope
     sanitized = pipeline.sanitize(
-        tenant_id, conversation_id, "Patient Lukas Berger wurde aufgenommen."
+        tenant_id, "conversation", conversation_id, "Patient Lukas Berger wurde aufgenommen."
     )
     assert sanitized.startswith("Patient ")
     assert sanitized.endswith(" wurde aufgenommen.")
@@ -114,7 +114,7 @@ def test_sanitize_raises_on_the_high_risk_combination(scope, pipeline):
         "mit der Diagnose Zystische Fibrose vorgestellt."
     )
     with pytest.raises(HighRiskMessageError):
-        pipeline.sanitize(tenant_id, conversation_id, text)
+        pipeline.sanitize(tenant_id, "conversation", conversation_id, text)
 
 
 def test_low_confidence_span_propagates_out_of_sanitize(scope, key_provider):
@@ -134,7 +134,7 @@ def test_low_confidence_span_propagates_out_of_sanitize(scope, key_provider):
     )
 
     with pytest.raises(LowConfidenceSpanError):
-        pipeline_with_stub_detector.sanitize(tenant_id, conversation_id, text)
+        pipeline_with_stub_detector.sanitize(tenant_id, "conversation", conversation_id, text)
 
 
 def test_a_rejected_message_writes_no_partially_sanitized_output(scope, pipeline):
@@ -144,7 +144,7 @@ def test_a_rejected_message_writes_no_partially_sanitized_output(scope, pipeline
         "mit der Diagnose Zystische Fibrose vorgestellt."
     )
     with pytest.raises(HighRiskMessageError) as excinfo:
-        pipeline.sanitize(tenant_id, conversation_id, text)
+        pipeline.sanitize(tenant_id, "conversation", conversation_id, text)
     assert "Simon Kraus" not in str(excinfo.value)
 
 
@@ -152,8 +152,8 @@ def test_round_trip_restores_the_original_values(scope, pipeline):
     tenant_id, conversation_id = scope
     text = "Patient Lukas Berger wurde am 12.03.2024 aufgenommen."
 
-    sanitized = pipeline.sanitize(tenant_id, conversation_id, text)
-    restored = pipeline.deanonymize(tenant_id, conversation_id, sanitized)
+    sanitized = pipeline.sanitize(tenant_id, "conversation", conversation_id, text)
+    restored = pipeline.deanonymize(tenant_id, "conversation", conversation_id, sanitized)
 
     assert restored == text
 
@@ -162,14 +162,14 @@ def test_deanonymize_rejects_leaked_pii(scope, pipeline):
     tenant_id, conversation_id = scope
     with pytest.raises(LeakageDetectedError):
         pipeline.deanonymize(
-            tenant_id, conversation_id, "Die Versichertennummer lautet A123456789."
+            tenant_id, "conversation", conversation_id, "Die Versichertennummer lautet A123456789."
         )
 
 
 def test_deanonymize_rejects_a_fabricated_token(scope, pipeline):
     tenant_id, conversation_id = scope
     with pytest.raises(UnresolvedTokenError):
-        pipeline.deanonymize(tenant_id, conversation_id, "Siehe PATIENT_0000000000.")
+        pipeline.deanonymize(tenant_id, "conversation", conversation_id, "Siehe PATIENT_0000000000.")
 
 
 class _NoOpPseudonymizer:
@@ -177,7 +177,7 @@ class _NoOpPseudonymizer:
     simulates the exact bug assert_no_raw_pii exists to catch, so sanitize() must
     fail closed on its own output rather than forward it to an LLM."""
 
-    def apply(self, tenant_id, conversation_id, text, spans):
+    def apply(self, tenant_id, scope_type, scope_id, text, spans):
         return text
 
 
@@ -195,14 +195,14 @@ def test_sanitize_fails_closed_if_pseudonymization_leaves_pii_behind(
 
     with pytest.raises(ResidualPIIError):
         broken_pipeline.sanitize(
-            tenant_id, conversation_id, "Patient Lukas Berger wurde aufgenommen."
+            tenant_id, "conversation", conversation_id, "Patient Lukas Berger wurde aufgenommen."
         )
 
 
 def test_sanitized_output_contains_only_well_formed_tokens(scope, pipeline):
     tenant_id, conversation_id = scope
     sanitized = pipeline.sanitize(
-        tenant_id, conversation_id, "Lukas Berger, A123456789, am 12.03.2024."
+        tenant_id, "conversation", conversation_id, "Lukas Berger, A123456789, am 12.03.2024."
     )
     tokens = re.findall(r"[A-Z][A-Z_]*_[0-9A-F]{10}", sanitized)
     assert len(tokens) == 3

@@ -71,10 +71,12 @@ def test_token_pattern_matches_the_adr_0009_shape():
 def test_resolves_an_authorized_token_back_to_its_value(scope, guard, key_provider):
     tenant_id, conversation_id = scope
     token = TokenVault(key_provider).create_mapping(
-        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
+        tenant_id, "conversation", conversation_id, "PATIENT", "Lukas Berger"
     )
 
-    restored = guard.restore(tenant_id, conversation_id, f"Die Behandlung von {token} verlief gut.")
+    restored = guard.restore(
+        tenant_id, "conversation", conversation_id, f"Die Behandlung von {token} verlief gut."
+    )
 
     assert restored == "Die Behandlung von Lukas Berger verlief gut."
 
@@ -82,10 +84,10 @@ def test_resolves_an_authorized_token_back_to_its_value(scope, guard, key_provid
 def test_resolves_several_tokens_in_one_output(scope, guard, key_provider):
     tenant_id, conversation_id = scope
     vault = TokenVault(key_provider)
-    patient = vault.create_mapping(tenant_id, conversation_id, "PATIENT", "Lukas Berger")
-    date = vault.create_mapping(tenant_id, conversation_id, "DATE", "12.03.2024")
+    patient = vault.create_mapping(tenant_id, "conversation", conversation_id, "PATIENT", "Lukas Berger")
+    date = vault.create_mapping(tenant_id, "conversation", conversation_id, "DATE", "12.03.2024")
 
-    restored = guard.restore(tenant_id, conversation_id, f"{patient} kam am {date} an.")
+    restored = guard.restore(tenant_id, "conversation", conversation_id, f"{patient} kam am {date} an.")
 
     assert restored == "Lukas Berger kam am 12.03.2024 an."
 
@@ -94,23 +96,25 @@ def test_raw_pii_in_llm_output_is_a_leakage_event(scope, guard):
     tenant_id, conversation_id = scope
     with pytest.raises(LeakageDetectedError, match="INSURANCE_NUMBER"):
         guard.restore(
-            tenant_id, conversation_id, "Die Versichertennummer lautet A123456789."
+            tenant_id, "conversation", conversation_id, "Die Versichertennummer lautet A123456789."
         )
 
 
 def test_a_leaked_name_is_caught_too(scope, guard):
     tenant_id, conversation_id = scope
     with pytest.raises(LeakageDetectedError):
-        guard.restore(tenant_id, conversation_id, "Lukas Berger wurde entlassen.")
+        guard.restore(tenant_id, "conversation", conversation_id, "Lukas Berger wurde entlassen.")
 
 
 def test_leakage_raises_rather_than_returning_partial_output(scope, guard, key_provider):
     tenant_id, conversation_id = scope
     token = TokenVault(key_provider).create_mapping(
-        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
+        tenant_id, "conversation", conversation_id, "PATIENT", "Lukas Berger"
     )
     with pytest.raises(LeakageDetectedError):
-        guard.restore(tenant_id, conversation_id, f"{token} am 12.03.2024 entlassen.")
+        guard.restore(
+            tenant_id, "conversation", conversation_id, f"{token} am 12.03.2024 entlassen."
+        )
 
 
 class _StubDetectorStack:
@@ -147,11 +151,11 @@ def test_ner_artifacts_around_a_token_are_not_leakage(scope, key_provider, detec
     """
     tenant_id, conversation_id = scope
     vault = TokenVault(key_provider)
-    token = vault.create_mapping(tenant_id, conversation_id, "DOCTOR", "Anna Schmitt")
+    token = vault.create_mapping(tenant_id, "conversation", conversation_id, "DOCTOR", "Anna Schmitt")
     guard = OutputGuard(detector_stack, vault)
 
     restored = guard.restore(
-        tenant_id, conversation_id, f"Die Befundung erfolgte durch Dr. {token}."
+        tenant_id, "conversation", conversation_id, f"Die Befundung erfolgte durch Dr. {token}."
     )
 
     assert restored == "Die Befundung erfolgte durch Dr. Anna Schmitt."
@@ -172,12 +176,12 @@ def test_an_ner_detected_name_beside_a_live_token_is_still_leakage(
     """
     tenant_id, conversation_id = scope
     vault = TokenVault(key_provider)
-    token = vault.create_mapping(tenant_id, conversation_id, "PATIENT", "Lukas Berger")
+    token = vault.create_mapping(tenant_id, "conversation", conversation_id, "PATIENT", "Lukas Berger")
     guard = OutputGuard(detector_stack, vault)
 
     with pytest.raises(LeakageDetectedError, match="PATIENT at"):
         guard.restore(
-            tenant_id, conversation_id, f"{token} heißt in Wahrheit Lukas Berger."
+            tenant_id, "conversation", conversation_id, f"{token} heißt in Wahrheit Lukas Berger."
         )
 
 
@@ -189,7 +193,7 @@ def test_a_span_that_merges_a_token_with_real_leaked_content_after_it_still_rais
     content must still raise `LeakageDetectedError`."""
     tenant_id, conversation_id = scope
     token = TokenVault(key_provider).create_mapping(
-        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
+        tenant_id, "conversation", conversation_id, "PATIENT", "Lukas Berger"
     )
     leaked_suffix = "Lukas Berger"
     text = f"{token}{leaked_suffix} wurde entlassen."
@@ -197,14 +201,14 @@ def test_a_span_that_merges_a_token_with_real_leaked_content_after_it_still_rais
     guard = OutputGuard(_StubDetectorStack([merged_span]), TokenVault(key_provider))
 
     with pytest.raises(LeakageDetectedError):
-        guard.restore(tenant_id, conversation_id, text)
+        guard.restore(tenant_id, "conversation", conversation_id, text)
 
 
 def test_a_span_that_merges_real_leaked_content_before_a_token_still_raises(scope, key_provider):
     """Same as above, mirrored: leaked content merged onto the *front* of a token."""
     tenant_id, conversation_id = scope
     token = TokenVault(key_provider).create_mapping(
-        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
+        tenant_id, "conversation", conversation_id, "PATIENT", "Lukas Berger"
     )
     leaked_prefix = "Lukas Berger"
     text = f"{leaked_prefix}{token} entlassen."
@@ -212,7 +216,7 @@ def test_a_span_that_merges_real_leaked_content_before_a_token_still_raises(scop
     guard = OutputGuard(_StubDetectorStack([merged_span]), TokenVault(key_provider))
 
     with pytest.raises(LeakageDetectedError):
-        guard.restore(tenant_id, conversation_id, text)
+        guard.restore(tenant_id, "conversation", conversation_id, text)
 
 
 def test_a_fabricated_token_fails_closed(scope, guard):
@@ -220,18 +224,20 @@ def test_a_fabricated_token_fails_closed(scope, guard):
     PATIENT_7F82A" produces a token-shaped string that was never issued."""
     tenant_id, conversation_id = scope
     with pytest.raises(UnresolvedTokenError, match="PATIENT_0000000000"):
-        guard.restore(tenant_id, conversation_id, "Der Wert von PATIENT_0000000000 ist unklar.")
+        guard.restore(
+            tenant_id, "conversation", conversation_id, "Der Wert von PATIENT_0000000000 ist unklar."
+        )
 
 
 def test_a_token_from_another_tenant_never_resolves(guard, key_provider):
     tenant_a, conversation_a = _new_scope(key_provider)
     tenant_b, _ = _new_scope(key_provider)
     token = TokenVault(key_provider).create_mapping(
-        tenant_a, conversation_a, "PATIENT", "Lukas Berger"
+        tenant_a, "conversation", conversation_a, "PATIENT", "Lukas Berger"
     )
 
     with pytest.raises(UnresolvedTokenError, match=token):
-        guard.restore(tenant_b, conversation_a, f"Bericht zu {token}.")
+        guard.restore(tenant_b, "conversation", conversation_a, f"Bericht zu {token}.")
 
 
 def test_a_token_from_another_conversation_never_resolves(guard, key_provider):
@@ -244,23 +250,23 @@ def test_a_token_from_another_conversation_never_resolves(guard, key_provider):
         conversation_b = ConversationRepository(session).create(tenant_id, user.id).id
 
     token = TokenVault(key_provider).create_mapping(
-        tenant_id, conversation_a, "PATIENT", "Lukas Berger"
+        tenant_id, "conversation", conversation_a, "PATIENT", "Lukas Berger"
     )
 
     with pytest.raises(UnresolvedTokenError, match=token):
-        guard.restore(tenant_id, conversation_b, f"Bericht zu {token}.")
+        guard.restore(tenant_id, "conversation", conversation_b, f"Bericht zu {token}.")
 
 
 def test_output_with_no_tokens_and_no_pii_passes_through(scope, guard):
     tenant_id, conversation_id = scope
     text = "Die Befunde sind unauffällig und es sind keine weiteren Schritte nötig."
-    assert guard.restore(tenant_id, conversation_id, text) == text
+    assert guard.restore(tenant_id, "conversation", conversation_id, text) == text
 
 
 def test_assert_no_raw_pii_passes_a_fully_tokenized_string(scope, guard, key_provider):
     tenant_id, conversation_id = scope
     token = TokenVault(key_provider).create_mapping(
-        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
+        tenant_id, "conversation", conversation_id, "PATIENT", "Lukas Berger"
     )
     guard.assert_no_raw_pii(f"Patient {token} wurde aufgenommen.")
 
@@ -285,17 +291,17 @@ def test_restore_unchecked_returns_output_that_restore_would_reject(scope, guard
     tenant_id, conversation_id = scope
     leaky = "Die Versichertennummer lautet A123456789."
     with pytest.raises(LeakageDetectedError):
-        guard.restore(tenant_id, conversation_id, leaky)
-    assert guard.restore_unchecked(tenant_id, conversation_id, leaky) == leaky
+        guard.restore(tenant_id, "conversation", conversation_id, leaky)
+    assert guard.restore_unchecked(tenant_id, "conversation", conversation_id, leaky) == leaky
 
 
 def test_restore_unchecked_still_resolves_legitimate_tokens(scope, guard, key_provider):
     tenant_id, conversation_id = scope
     token = TokenVault(key_provider).create_mapping(
-        tenant_id, conversation_id, "PATIENT", "Lukas Berger"
+        tenant_id, "conversation", conversation_id, "PATIENT", "Lukas Berger"
     )
     assert guard.restore_unchecked(
-        tenant_id, conversation_id, f"Die Behandlung von {token} verlief gut."
+        tenant_id, "conversation", conversation_id, f"Die Behandlung von {token} verlief gut."
     ) == "Die Behandlung von Lukas Berger verlief gut."
 
 
@@ -305,5 +311,5 @@ def test_restore_unchecked_still_raises_on_unresolved_token(scope, guard):
     tenant_id, conversation_id = scope
     with pytest.raises(UnresolvedTokenError, match="PATIENT_0000000000"):
         guard.restore_unchecked(
-            tenant_id, conversation_id, "Der Wert von PATIENT_0000000000 ist unklar."
+            tenant_id, "conversation", conversation_id, "Der Wert von PATIENT_0000000000 ist unklar."
         )

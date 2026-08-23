@@ -112,13 +112,17 @@ def _stream_and_guard(
                 usage = item
                 continue
             for completed in buffer.feed(item.text):
-                human_readable = pipeline.deanonymize(tenant_id, conversation_id, completed)
+                human_readable = pipeline.deanonymize(
+                    tenant_id, "conversation", conversation_id, completed
+                )
                 sanitized_chunks.append(completed)
                 yield _sse_token(human_readable)
 
         remainder = buffer.flush_remainder()
         if remainder is not None:
-            human_readable = pipeline.deanonymize(tenant_id, conversation_id, remainder)
+            human_readable = pipeline.deanonymize(
+                tenant_id, "conversation", conversation_id, remainder
+            )
             sanitized_chunks.append(remainder)
             yield _sse_token(human_readable)
 
@@ -219,7 +223,9 @@ def send_message(
     )
 
     try:
-        sanitized_prompt = pipeline.sanitize(user.tenant_id, conversation_id, body.content)
+        sanitized_prompt = pipeline.sanitize(
+            user.tenant_id, "conversation", conversation_id, body.content
+        )
     except (LowConfidenceSpanError, HighRiskMessageError, ResidualPIIError) as exc:
         raise HTTPException(status_code=422, detail=FAIL_CLOSED_MESSAGE) from exc
 

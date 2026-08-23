@@ -82,7 +82,9 @@ def test_get_messages_reconstructs_human_readable_text(scope, client):
     with tenant_scoped_session(tenant_id) as session:
         conversation_id = ConversationRepository(session).create(tenant_id, user_id).id
 
-    sanitized = get_pipeline().sanitize(tenant_id, conversation_id, "Hallo, hier ist Anna Schmitt.")
+    sanitized = get_pipeline().sanitize(
+        tenant_id, "conversation", conversation_id, "Hallo, hier ist Anna Schmitt."
+    )
     with tenant_scoped_session(tenant_id) as session:
         MessageRepository(session).create(
             tenant_id, conversation_id, role="user", sanitized_content=sanitized
