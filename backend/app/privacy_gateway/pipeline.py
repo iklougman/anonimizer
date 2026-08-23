@@ -27,7 +27,7 @@ from app.privacy_gateway.risk_scoring.scorer import (
     RiskScorer,
 )
 from app.privacy_gateway.token_vault.key_provider import FileSecretKeyProvider
-from app.privacy_gateway.token_vault.vault import TokenVault
+from app.privacy_gateway.token_vault.vault import ScopeType, TokenVault
 
 __all__ = [
     "HighRiskMessageError",
@@ -67,7 +67,7 @@ class Pipeline:
             )
 
     def sanitize(
-        self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, text: str
+        self, tenant_id: uuid.UUID, scope_type: ScopeType, scope_id: uuid.UUID, text: str
     ) -> str:
         """Design spec §4: runs all three detector layers, risk-scores every span,
         raises on HIGH-risk or low-confidence, else returns the fully pseudonymized
@@ -81,31 +81,32 @@ class Pipeline:
         spans = self._detector_stack.detect(text)
         span_counts = dict(Counter(span.entity_type for span in spans))
         logger.info(
-            "sanitize.detect tenant_id=%s conversation_id=%s spans=%d types=%s",
-            tenant_id, conversation_id, len(spans), span_counts,
+            "sanitize.detect tenant_id=%s scope_type=%s scope_id=%s spans=%d types=%s",
+            tenant_id, scope_type, scope_id, len(spans), span_counts,
         )
 
         try:
             assessment = self._risk_scorer.score(text, spans)
         except (LowConfidenceSpanError, HighRiskMessageError) as exc:
             logger.warning(
-                "sanitize.reject tenant_id=%s conversation_id=%s reason=%s: %s",
-                tenant_id, conversation_id, type(exc).__name__, exc,
+                "sanitize.reject tenant_id=%s scope_type=%s scope_id=%s reason=%s: %s",
+                tenant_id, scope_type, scope_id, type(exc).__name__, exc,
             )
             raise
 
         logger.info(
-            "sanitize.risk_assessment tenant_id=%s conversation_id=%s "
+            "sanitize.risk_assessment tenant_id=%s scope_type=%s scope_id=%s "
             "quasi_identifier_categories=%s rare_disease_matches=%d tokens_to_issue=%d",
             tenant_id,
-            conversation_id,
+            scope_type,
+            scope_id,
             sorted(assessment.quasi_identifier_categories),
             len(assessment.rare_diseases),
             len(assessment.tokenize),
         )
 
         result = self._pseudonymizer.apply(
-            tenant_id, conversation_id, text, assessment.tokenize
+            tenant_id, scope_type, scope_id, text, assessment.tokenize
         )
 
         # Pre-send check: verify sanitize()'s own output before it ever reaches an
@@ -117,19 +118,19 @@ class Pipeline:
             self._output_guard.assert_no_raw_pii(result)
         except ResidualPIIError as exc:
             logger.warning(
-                "sanitize.residual_pii tenant_id=%s conversation_id=%s reason=%s: %s",
-                tenant_id, conversation_id, type(exc).__name__, exc,
+                "sanitize.residual_pii tenant_id=%s scope_type=%s scope_id=%s reason=%s: %s",
+                tenant_id, scope_type, scope_id, type(exc).__name__, exc,
             )
             raise
 
         logger.info(
-            "sanitize.pseudonymize tenant_id=%s conversation_id=%s tokens_issued=%d -> PASS",
-            tenant_id, conversation_id, len(assessment.tokenize),
+            "sanitize.pseudonymize tenant_id=%s scope_type=%s scope_id=%s tokens_issued=%d -> PASS",
+            tenant_id, scope_type, scope_id, len(assessment.tokenize),
         )
         return result
 
     def deanonymize(
-        self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, llm_output: str
+        self, tenant_id: uuid.UUID, scope_type: ScopeType, scope_id: uuid.UUID, llm_output: str
     ) -> str:
         """Design spec §5: leakage scan, then authorization-checked token resolution.
 
@@ -141,32 +142,32 @@ class Pipeline:
         """
         try:
             if self._guard_enabled:
-                result = self._output_guard.restore(tenant_id, conversation_id, llm_output)
+                result = self._output_guard.restore(tenant_id, scope_type, scope_id, llm_output)
             else:
                 logger.warning(
-                    "deanonymize.UNGUARDED tenant_id=%s conversation_id=%s "
+                    "deanonymize.UNGUARDED tenant_id=%s scope_type=%s scope_id=%s "
                     "output_guard disabled by config; raw LLM output returned",
-                    tenant_id, conversation_id,
+                    tenant_id, scope_type, scope_id,
                 )
                 result = self._output_guard.restore_unchecked(
-                    tenant_id, conversation_id, llm_output
+                    tenant_id, scope_type, scope_id, llm_output
                 )
         except UnresolvedTokenError as exc:
             logger.warning(
-                "deanonymize.reject tenant_id=%s conversation_id=%s reason=%s: %s",
-                tenant_id, conversation_id, type(exc).__name__, exc,
+                "deanonymize.reject tenant_id=%s scope_type=%s scope_id=%s reason=%s: %s",
+                tenant_id, scope_type, scope_id, type(exc).__name__, exc,
             )
             raise
         except LeakageDetectedError as exc:
             logger.warning(
-                "deanonymize.reject tenant_id=%s conversation_id=%s reason=%s: %s",
-                tenant_id, conversation_id, type(exc).__name__, exc,
+                "deanonymize.reject tenant_id=%s scope_type=%s scope_id=%s reason=%s: %s",
+                tenant_id, scope_type, scope_id, type(exc).__name__, exc,
             )
             raise
 
         logger.info(
-            "deanonymize.restore tenant_id=%s conversation_id=%s -> PASS",
-            tenant_id, conversation_id,
+            "deanonymize.restore tenant_id=%s scope_type=%s scope_id=%s -> PASS",
+            tenant_id, scope_type, scope_id,
         )
         return result
 
@@ -191,11 +192,11 @@ def get_pipeline() -> Pipeline:
     )
 
 
-def sanitize(tenant_id: uuid.UUID, conversation_id: uuid.UUID, text: str) -> str:
-    return get_pipeline().sanitize(tenant_id, conversation_id, text)
+def sanitize(tenant_id: uuid.UUID, scope_type: ScopeType, scope_id: uuid.UUID, text: str) -> str:
+    return get_pipeline().sanitize(tenant_id, scope_type, scope_id, text)
 
 
 def deanonymize(
-    tenant_id: uuid.UUID, conversation_id: uuid.UUID, llm_output: str
+    tenant_id: uuid.UUID, scope_type: ScopeType, scope_id: uuid.UUID, llm_output: str
 ) -> str:
-    return get_pipeline().deanonymize(tenant_id, conversation_id, llm_output)
+    return get_pipeline().deanonymize(tenant_id, scope_type, scope_id, llm_output)

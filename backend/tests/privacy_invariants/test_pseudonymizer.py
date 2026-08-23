@@ -49,7 +49,7 @@ def test_replaces_a_span_with_a_vault_token(scope, pseudonymizer):
     text = "Patient Lukas Berger wurde aufgenommen."
     spans = [Span(8, 20, "PATIENT", 0.85, "custom")]
 
-    result = pseudonymizer.apply(tenant_id, conversation_id, text, spans)
+    result = pseudonymizer.apply(tenant_id, "conversation", conversation_id, text, spans)
 
     assert "Lukas Berger" not in result
     assert result.startswith("Patient PATIENT_")
@@ -67,7 +67,7 @@ def test_multiple_spans_keep_their_offsets_correct(scope, pseudonymizer):
         Span(29, 39, "DATE", 1.0, "regex"),
     ]
 
-    result = pseudonymizer.apply(tenant_id, conversation_id, text, spans)
+    result = pseudonymizer.apply(tenant_id, "conversation", conversation_id, text, spans)
 
     assert "Lukas Berger" not in result
     assert "A123456789" not in result
@@ -85,7 +85,7 @@ def test_spans_supplied_out_of_order_are_still_replaced_correctly(scope, pseudon
         Span(14, 24, "INSURANCE_NUMBER", 1.0, "regex"),
     ]
 
-    result = pseudonymizer.apply(tenant_id, conversation_id, text, spans)
+    result = pseudonymizer.apply(tenant_id, "conversation", conversation_id, text, spans)
 
     assert "Lukas Berger" not in result
     assert "A123456789" not in result
@@ -104,7 +104,7 @@ def test_the_same_value_gets_the_same_token_within_one_call(scope, pseudonymizer
         Span(46, 59, "PERSON", 0.85, "custom"),
     ]
 
-    result = pseudonymizer.apply(tenant_id, conversation_id, text, spans)
+    result = pseudonymizer.apply(tenant_id, "conversation", conversation_id, text, spans)
     tokens = re.findall(r"[A-Z][A-Z_]*_[0-9A-F]{10}", result)
 
     assert len(tokens) == 3
@@ -121,7 +121,7 @@ def test_different_surfaces_of_the_same_person_get_different_tokens(scope, pseud
         Span(34, 45, "PERSON", 0.85, "custom"),
     ]
 
-    result = pseudonymizer.apply(tenant_id, conversation_id, text, spans)
+    result = pseudonymizer.apply(tenant_id, "conversation", conversation_id, text, spans)
     tokens = re.findall(r"[A-Z][A-Z_]*_[0-9A-F]{10}", result)
 
     assert len(set(tokens)) == 2
@@ -130,7 +130,7 @@ def test_different_surfaces_of_the_same_person_get_different_tokens(scope, pseud
 def test_tokens_match_the_adr_0009_shape(scope, pseudonymizer):
     tenant_id, conversation_id = scope
     result = pseudonymizer.apply(
-        tenant_id, conversation_id, "Lukas Berger", [Span(0, 12, "PATIENT", 0.85, "custom")]
+        tenant_id, "conversation", conversation_id, "Lukas Berger", [Span(0, 12, "PATIENT", 0.85, "custom")]
     )
     assert TOKEN_SHAPE.match(result)
 
@@ -141,14 +141,14 @@ def test_issued_tokens_resolve_back_to_the_original_values(scope, key_provider):
     text = "Lukas Berger wurde aufgenommen."
 
     result = Pseudonymizer(vault).apply(
-        tenant_id, conversation_id, text, [Span(0, 12, "PATIENT", 0.85, "custom")]
+        tenant_id, "conversation", conversation_id, text, [Span(0, 12, "PATIENT", 0.85, "custom")]
     )
     token = re.findall(r"[A-Z][A-Z_]*_[0-9A-F]{10}", result)[0]
 
-    assert vault.resolve_token(tenant_id, conversation_id, token) == "Lukas Berger"
+    assert vault.resolve_token(tenant_id, "conversation", conversation_id, token) == "Lukas Berger"
 
 
 def test_no_spans_leaves_the_text_untouched(scope, pseudonymizer):
     tenant_id, conversation_id = scope
     text = "Keine sensiblen Angaben."
-    assert pseudonymizer.apply(tenant_id, conversation_id, text, []) == text
+    assert pseudonymizer.apply(tenant_id, "conversation", conversation_id, text, []) == text

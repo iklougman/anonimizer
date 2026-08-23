@@ -5,7 +5,7 @@ import uuid
 
 from app.privacy_gateway.detectors.base import Span
 from app.privacy_gateway.detectors.stack import DetectorStack
-from app.privacy_gateway.token_vault.vault import TokenVault
+from app.privacy_gateway.token_vault.vault import ScopeType, TokenVault
 
 # ADR-0009's token format: entity type + secrets.token_hex(5).upper(). The design
 # spec's `[TYPE_XXXXX]` notation is shorthand for this shape — there are no literal
@@ -71,7 +71,7 @@ class OutputGuard:
         self._vault = vault
 
     def restore(
-        self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, llm_output: str
+        self, tenant_id: uuid.UUID, scope_type: ScopeType, scope_id: uuid.UUID, llm_output: str
     ) -> str:
         token_bounds = _token_bounds(llm_output)
 
@@ -91,10 +91,10 @@ class OutputGuard:
                 entity_types=[span.entity_type for span in leaked],
             )
 
-        return self._resolve(tenant_id, conversation_id, llm_output, token_bounds)
+        return self._resolve(tenant_id, scope_type, scope_id, llm_output, token_bounds)
 
     def restore_unchecked(
-        self, tenant_id: uuid.UUID, conversation_id: uuid.UUID, llm_output: str
+        self, tenant_id: uuid.UUID, scope_type: ScopeType, scope_id: uuid.UUID, llm_output: str
     ) -> str:
         """Debug path (OUTPUT_GUARD_ENABLED=false): skip the leakage scan but still
         resolve tokens and still fail on unresolved ones. Returns the LLM's raw
@@ -104,26 +104,27 @@ class OutputGuard:
         bypassed.
         """
         return self._resolve(
-            tenant_id, conversation_id, llm_output, _token_bounds(llm_output)
+            tenant_id, scope_type, scope_id, llm_output, _token_bounds(llm_output)
         )
 
     def _resolve(
         self,
         tenant_id: uuid.UUID,
-        conversation_id: uuid.UUID,
+        scope_type: ScopeType,
+        scope_id: uuid.UUID,
         llm_output: str,
         token_bounds: list[tuple[int, int]],
     ) -> str:
         # Steps 2 and 3: extract the token-shaped substrings and let TokenVault apply
-        # the (tenant_id, conversation_id) authorization scope.
+        # the (tenant_id, scope_type, scope_id) authorization scope.
         tokens = [llm_output[start:end] for start, end in token_bounds]
-        resolved = self._vault.resolve_tokens(tenant_id, conversation_id, tokens)
+        resolved = self._vault.resolve_tokens(tenant_id, scope_type, scope_id, tokens)
 
         # Step 4: anything still unresolved is fail-closed.
         unresolved = sorted({token for token in tokens if token not in resolved})
         if unresolved:
             raise UnresolvedTokenError(
-                "token(s) not issued for this tenant and conversation: "
+                "token(s) not issued for this tenant and scope: "
                 + ", ".join(unresolved)
                 + "; the response is rejected rather than returned opaque",
                 tokens=unresolved,

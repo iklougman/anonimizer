@@ -3,6 +3,7 @@ from app.models.audit_event import AuditEvent
 from app.models.base import Base
 from app.models.branch import Branch
 from app.models.conversation import Conversation
+from app.models.document import Document
 from app.models.llm_request import LLMRequest
 from app.models.message import Message
 from app.models.tenant import Tenant
@@ -19,6 +20,7 @@ __all__ = [
     "Base",
     "Branch",
     "Conversation",
+    "Document",
     "LLMRequest",
     "Message",
     "Tenant",

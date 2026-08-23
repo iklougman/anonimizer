@@ -106,7 +106,9 @@ def get_messages(
         MessageOut(
             id=message.id,
             role=message.role,
-            content=pipeline.deanonymize(user.tenant_id, conversation_id, message.sanitized_content),
+            content=pipeline.deanonymize(
+                user.tenant_id, "conversation", conversation_id, message.sanitized_content
+            ),
             created_at=message.created_at,
         )
         for message in messages

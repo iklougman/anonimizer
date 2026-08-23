@@ -4,7 +4,7 @@ import uuid
 from collections.abc import Sequence
 
 from app.privacy_gateway.detectors.base import Span
-from app.privacy_gateway.token_vault.vault import TokenVault
+from app.privacy_gateway.token_vault.vault import ScopeType, TokenVault
 
 
 class Pseudonymizer:
@@ -16,7 +16,8 @@ class Pseudonymizer:
     def apply(
         self,
         tenant_id: uuid.UUID,
-        conversation_id: uuid.UUID,
+        scope_type: ScopeType,
+        scope_id: uuid.UUID,
         text: str,
         spans: Sequence[Span],
     ) -> str:
@@ -35,7 +36,7 @@ class Pseudonymizer:
             token = issued.get(key)
             if token is None:
                 token = self._vault.create_mapping(
-                    tenant_id, conversation_id, span.entity_type, original_value
+                    tenant_id, scope_type, scope_id, span.entity_type, original_value
                 )
                 issued[key] = token
             result = result[: span.start] + token + result[span.end :]
