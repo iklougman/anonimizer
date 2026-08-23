@@ -10,7 +10,6 @@ from fastapi.testclient import TestClient
 from app.auth.dependencies import get_current_user
 from app.auth.permissions import ALL_PERMISSIONS, DEFAULT_PERMISSIONS, Permission
 from app.auth.tenant_resolver import AuthenticatedUser
-from app.db.repositories.audit_event_repository import AuditEventRepository
 from app.db.repositories.branch_repository import BranchRepository
 from app.db.repositories.conversation_repository import ConversationRepository
 from app.db.repositories.tenant_repository import TenantRepository
