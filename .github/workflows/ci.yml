@@ -133,7 +133,7 @@ jobs:
           name: playwright-report
           path: e2e/playwright-report/
       - if: failure()
-        run: docker compose logs > compose-logs.txt
+        run: docker compose -f docker-compose.yml -f docker-compose.ci.yml logs > compose-logs.txt
       - if: failure()
         uses: actions/upload-artifact@v4
         with:
