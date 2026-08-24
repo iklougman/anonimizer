@@ -1,0 +1,94 @@
+- generic [ref=e2]:
+  - banner [ref=e3]:
+    - paragraph [ref=e4]: chatgpt-proxy Â· backend
+    - heading "Privacy Pipeline Schema" [level=1] [ref=e5]
+    - paragraph [ref=e6]: The path a message takes from the chat API through detection, risk scoring, and pseudonymization, across the network boundary to the LLM, and back through leakage scanning and token restoration. Pseudonymized text is the only payload that crosses the boundary; every failure is fail-closed.
+  - figure [ref=e7]:
+    - 'img "Privacy pipeline flow: a user message is sanitized through detector stack, risk scorer, pseudonymizer, and a pre-send residual-PII check, then persisted; only pseudonymized text crosses the boundary to the OpenAI provider, whose completion is leakage-scanned, token-resolved, and deanonymized before being persisted and streamed back. Fail-closed off-ramps return 422, 502, or 500." [ref=e8]':
+      - generic [ref=e9]: "Client Â· POST /api/conversations/{id}/messages"
+      - generic [ref=e12]: Chat API Â· receive (chat.py)
+      - generic [ref=e15]: SANITIZE â€” pipeline.sanitize()
+      - generic [ref=e16]:
+        - generic [ref=e18]: DetectorStack.detect()
+        - generic [ref=e19]: regex Â· presidio (de_core_news_lg) Â· hospital names
+      - generic [ref=e20]:
+        - generic [ref=e22]: RiskScorer.score()
+        - generic [ref=e23]: quasi-identifiers Â· rare diseases â†’ tokens to issue
+      - generic [ref=e24]:
+        - generic [ref=e26]: Pseudonymizer.apply()
+        - generic [ref=e27]: substitute spans â†’ TYPE_XXXXXXXXXX tokens
+      - generic [ref=e28]:
+        - generic [ref=e30]: OutputGuard.assert_no_raw_pii()
+        - generic [ref=e31]: mask tokens, re-scan â€” pre-send self-check
+      - generic [ref=e32]:
+        - generic [ref=e34]: Persist user message
+        - generic [ref=e35]: sanitized_content + title Â· commit
+      - generic [ref=e36]: privacy / network boundary
+      - generic [ref=e37]:
+        - generic [ref=e39]: LLMProvider.complete()
+        - generic [ref=e40]: OpenAI Â· /chat/completions Â· gpt-5-nano
+        - generic [ref=e41]: system prompt + pseudonymized text only
+      - generic [ref=e42]: pseudonymized text is the only thing that crosses
+      - generic [ref=e43]: DEANONYMIZE â€” pipeline.deanonymize() / OutputGuard.restore()
+      - generic [ref=e44]:
+        - generic [ref=e46]: Leakage scan Â· mask tokens, re-scan
+        - generic [ref=e47]: raw-looking PII in output â†’ reject
+      - generic [ref=e48]:
+        - generic [ref=e50]: TokenVault.resolve_tokens()
+        - generic [ref=e51]: "scope: (tenant_id, conversation_id)"
+      - generic [ref=e52]:
+        - generic [ref=e54]: Replace tokens with plaintext
+        - generic [ref=e55]: â†’ human-readable response
+      - generic [ref=e56]:
+        - generic [ref=e58]: Persist assistant message + LLMRequest
+        - generic [ref=e59]: raw completion as sanitized_content
+        - generic [ref=e60]: tokens_in/out Â· cost_usd Â· latency Â· commit
+      - generic [ref=e61]:
+        - generic [ref=e63]: SSE replay â†’ Client
+        - generic [ref=e64]: human-readable text, token-chunked
+      - generic [ref=e65]: pseudonymized
+      - generic [ref=e66]: pseudonymized
+      - generic [ref=e67]:
+        - generic [ref=e69]: TokenVault
+        - generic [ref=e70]: encrypted tokenâ†”PII map
+      - generic [ref=e74]: issue
+      - generic [ref=e75]: resolve
+      - generic [ref=e76]:
+        - generic [ref=e78]: messages
+        - generic [ref=e79]: sanitized_content
+      - generic [ref=e83]:
+        - generic [ref=e85]: llm_requests
+        - generic [ref=e86]: tokens Â· cost Â· model
+      - generic [ref=e87]:
+        - generic [ref=e89]: 422 Â· low-confidence / high-risk
+        - generic [ref=e90]: message rejected before send
+        - generic [ref=e92]: 422 Â· residual PII
+        - generic [ref=e93]: pseudonymization missed a span
+        - generic [ref=e95]: 502 Â· provider unavailable
+        - generic [ref=e96]: LLMProviderError
+        - generic [ref=e98]: 500 Â· leakage detected
+        - generic [ref=e99]: audit_event written, no partial return
+        - generic [ref=e101]: 500 Â· unresolved token
+        - generic [ref=e102]: audit_event written, no opaque return
+    - generic [ref=e103]:
+      - text: "The request travels down the spine. The two teal dashes bracket the only component that lives outside the privacy boundary â€” the LLM provider â€” and the teal arrows are the only data that crosses it: pseudonymized text in, pseudonymized completion out. Stores (left, dashed) and fail-closed outcomes (right) never cross. The token vault is scoped to"
+      - code [ref=e104]: (tenant_id, conversation_id)
+      - text: ", so a token issued for one conversation cannot resolve in another."
+  - generic [ref=e105]:
+    - generic [ref=e106]: pseudonymized text crossing the boundary
+    - generic [ref=e108]: flow inside the boundary
+    - generic [ref=e110]: data store read/write
+    - generic [ref=e112]: fail-closed off-ramp
+  - generic [ref=e114]:
+    - generic [ref=e115]:
+      - heading "What the model sees" [level=2] [ref=e116]
+      - paragraph [ref=e117]:
+        - text: The provider only ever receives pseudonymized text â€” the system-preservation prompt plus token-substituted content. Raw patient data, the token vault, and the message store all stay inside the boundary. The completion it returns is also pseudonymized (it reproduces tokens verbatim); plaintext reappears only after
+        - code [ref=e118]: resolve_tokens
+        - text: substitutes them back.
+    - generic [ref=e119]:
+      - heading "What the diagram does not yet show" [level=2] [ref=e120]
+      - paragraph [ref=e121]:
+        - text: Today the provider is called with a single message â€” no conversation history. The specced change sends full sanitized history as a message list and adds context-window trimming, per-conversation model selection, and an inline usage view. That history is the same pseudonymized
+        - code [ref=e122]: sanitized_content
+        - text: shown here, so it crosses the boundary on the same teal arrow.

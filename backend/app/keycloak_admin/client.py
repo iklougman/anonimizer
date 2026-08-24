@@ -112,6 +112,22 @@ class KeycloakAdminClient:
         except httpx.HTTPError as exc:
             raise KeycloakAdminError(f"set_enabled({subject!r}, {enabled}) failed: {exc}") from exc
 
+    def set_password(self, subject: str, password: str, temporary: bool = False) -> None:
+        """Sets (resets) a user's password directly, clearing any pending
+        UPDATE_PASSWORD required action when temporary=False. create_user()
+        always sets that required action; a caller that needs the user to be
+        immediately usable via a password grant (e.g. e2e tenant
+        provisioning) must call this afterward."""
+        try:
+            response = self._http_client.put(
+                f"{self._base_url}/admin/realms/{self._realm}/users/{subject}/reset-password",
+                headers=self._headers(),
+                json={"type": "password", "value": password, "temporary": temporary},
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise KeycloakAdminError(f"set_password({subject!r}) failed: {exc}") from exc
+
     def send_invite(self, subject: str) -> None:
         try:
             response = self._http_client.put(
