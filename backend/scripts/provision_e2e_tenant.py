@@ -162,6 +162,12 @@ def cleanup(tenant_id: uuid.UUID, use_fake_keycloak_client: bool) -> int:
         session.execute(sa.text("DELETE FROM messages WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
         session.execute(sa.text("DELETE FROM conversations WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
         session.execute(sa.text("DELETE FROM users WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
+        # tenant_role_permissions FKs directly to tenants.id (migration 0006) --
+        # PUT /api/admin/permissions (app/api/admin.py) writes rows here via
+        # RolePermissionRepository.replace_for_tenant whenever an admin saves a
+        # permission override, so any tenant that had one written fails the
+        # tenants delete below with a ForeignKeyViolation unless cleared first.
+        session.execute(sa.text("DELETE FROM tenant_role_permissions WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
         # tenant_app_assignments FKs to branches via branch_id (nullable; always
         # NULL for assignments this script creates, but deleting it before
         # branches defensively holds even if a future change adds a

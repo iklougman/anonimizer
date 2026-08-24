@@ -12,6 +12,7 @@ from app.db.repositories.audit_event_repository import AuditEventRepository
 from app.db.repositories.conversation_repository import ConversationRepository
 from app.db.repositories.llm_request_repository import LLMRequestRepository
 from app.db.repositories.message_repository import MessageRepository
+from app.db.repositories.role_permission_repository import RolePermissionRepository
 from app.db.session import SessionLocal, tenant_scoped_session
 from app.models import Branch, Tenant, User
 
@@ -156,6 +157,45 @@ def test_cleanup_succeeds_for_a_tenant_with_real_chat_activity(fake_keycloak_adm
                 {"tenant_id": str(tenant_id)},
             ).scalar_one()
             assert remaining == 0, f"{table} still has rows for cleaned-up tenant {tenant_id}"
+    admin_engine.dispose()
+
+
+def test_cleanup_succeeds_for_a_tenant_with_a_permission_override(fake_keycloak_admin_client):
+    """Regression test for the Task 7 finding: cleanup() deleted
+    llm_requests/audit_events/token_mappings/messages/conversations/users/
+    tenant_app_assignments/branches but never touched tenant_role_permissions,
+    which carries a hard FK straight to tenants.id (migration 0006). Any
+    tenant that had a permission override written via PUT /api/admin/permissions
+    (app/api/admin.py -> RolePermissionRepository.replace_for_tenant) made the
+    final `DELETE FROM tenants` fail with a ForeignKeyViolation. This writes an
+    override row via the real RolePermissionRepository the same way that
+    endpoint does, then asserts cleanup now exits 0 and the tenant -- including
+    its tenant_role_permissions rows -- is fully gone."""
+    result = _run_script("create", "--fake-keycloak-client")
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    tenant_id = uuid.UUID(payload["tenant_id"])
+
+    with tenant_scoped_session(tenant_id) as session:
+        RolePermissionRepository(session).replace_for_tenant(
+            tenant_id, [("doctor", "conversations:read:all", True)]
+        )
+
+    cleanup_result = _run_script("cleanup", "--tenant-id", str(tenant_id), "--fake-keycloak-client")
+    assert cleanup_result.returncode == 0, cleanup_result.stderr
+
+    with SessionLocal() as session:
+        assert session.get(Tenant, tenant_id) is None
+
+    admin_engine = sa.create_engine(get_settings().database_url)
+    with admin_engine.connect() as connection:
+        remaining = connection.execute(
+            sa.text(
+                "SELECT count(*) FROM tenant_role_permissions WHERE tenant_id = :tenant_id"
+            ),
+            {"tenant_id": str(tenant_id)},
+        ).scalar_one()
+        assert remaining == 0, f"tenant_role_permissions still has rows for cleaned-up tenant {tenant_id}"
     admin_engine.dispose()
 
 
