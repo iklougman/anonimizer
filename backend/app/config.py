@@ -63,7 +63,7 @@ class Settings(BaseSettings):
     keycloak_admin_client_secret: str | None = None
 
     # ADR-0016 / ADR-0022: both providers ship in the MVP.
-    llm_provider: Literal["ollama", "openai"] = "ollama"
+    llm_provider: Literal["ollama", "openai", "stub"] = "ollama"
     ollama_base_url: str = "http://ollama:11434"
     ollama_model: str = "llama3.1"
     openai_api_key: str | None = None
@@ -85,6 +85,15 @@ class Settings(BaseSettings):
             raise ValueError(
                 "OPENAI_API_KEY is required when LLM_PROVIDER=openai"
             )
+        return self
+
+    @model_validator(mode="after")
+    def _forbid_stub_provider_in_production(self) -> "Settings":
+        # ADR-0020: fail closed at startup, not at first request. The stub
+        # provider exists for deterministic/fast e2e and CI runs only -- it
+        # must never be reachable by a misconfigured production deployment.
+        if self.llm_provider == "stub" and self.environment == "production":
+            raise ValueError("LLM_PROVIDER=stub is forbidden when ENVIRONMENT=production")
         return self
 
     @property
