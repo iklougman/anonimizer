@@ -122,3 +122,49 @@ def test_delete_user_swallows_its_own_failure():
     )
 
     admin.delete_user("subject-abc")  # must not raise
+
+
+def test_set_password_puts_reset_password_with_temporary_false():
+    seen: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/token"):
+            return _token_response()
+        seen["request"] = request
+        return httpx.Response(204)
+
+    admin = KeycloakAdminClient(
+        base_url="http://keycloak",
+        realm="dev",
+        client_id="backend-admin",
+        client_secret="s3cret",
+        http_client=_client(handler),
+    )
+
+    admin.set_password("subject-123", "a-real-password", temporary=False)
+
+    request = seen["request"]
+    assert request.method == "PUT"
+    assert request.url.path == "/admin/realms/dev/users/subject-123/reset-password"
+    import json
+
+    body = json.loads(request.content)
+    assert body == {"type": "password", "value": "a-real-password", "temporary": False}
+
+
+def test_set_password_raises_keycloak_admin_error_on_failure():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/token"):
+            return _token_response()
+        return httpx.Response(400, json={"error": "bad request"})
+
+    admin = KeycloakAdminClient(
+        base_url="http://keycloak",
+        realm="dev",
+        client_id="backend-admin",
+        client_secret="s3cret",
+        http_client=_client(handler),
+    )
+
+    with pytest.raises(KeycloakAdminError):
+        admin.set_password("subject-123", "a-real-password")
