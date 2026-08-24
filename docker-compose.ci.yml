@@ -1,0 +1,20 @@
+# CI-only compose overlay (see .github/workflows/ci.yml's `e2e` job).
+#
+# docker-compose.yml deliberately publishes no host port for backend/frontend
+# in the base file -- production traffic reaches them only through Traefik
+# (see the comments on those two services in docker-compose.yml). Local dev
+# restores direct ports via docker-compose.override.yml, but that file is
+# gitignored/per-developer (see docker-compose.override.yml.example) and
+# does not exist in a fresh CI checkout, so a CI-committed file is needed
+# instead. This one publishes only what e2e/scripts/wait-for-health.sh and
+# the Playwright suite's E2E_BASE_URL/injectSession() already assume
+# (backend on :8000, frontend on :3000) -- no volumes, no --reload/dev
+# command, so CI still builds and runs the real production images.
+services:
+  backend:
+    ports:
+      - "127.0.0.1:8000:8000"
+
+  frontend:
+    ports:
+      - "127.0.0.1:3000:3000"
