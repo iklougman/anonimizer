@@ -47,10 +47,11 @@ async function locateBranchRenameInputByValue(page: Page, name: string): Promise
 // just that some branch got attached), and finally changes that user's
 // role.
 //
-// Both state-changing checks below (branch rename, user role change) are
-// tied to the real PATCH request/response round-trip via
-// page.waitForResponse + a reload, not to the optimistic local component
-// state that updates the DOM before the network call resolves:
+// All three state-changing checks below (branch rename, user branch
+// assignment on create, user role change) are tied to the real request/
+// response round-trip via page.waitForResponse + a reload, not to the
+// optimistic local component state that updates the DOM before the
+// network call resolves:
 //   - AdminBranchesPage's rename <input> (frontend/app/(shell)/admin/
 //     branches/page.tsx) is a controlled input whose displayed value
 //     (`renaming[branch.id] ?? branch.name`) follows the onChange handler
@@ -66,6 +67,12 @@ async function locateBranchRenameInputByValue(page: Page, name: string): Promise
 //     that transient state and pass even though the PATCH later fails
 //     (React would eventually re-render back to the prior value, but the
 //     assertion may already have resolved true by then).
+//   - The branch assignment made in the create-user form is checked the
+//     same way for a related but distinct reason: selectOption({ label })
+//     only proves the option was present in the DOM at selection time, not
+//     that branchId state was correctly captured, sent in the POST body,
+//     or actually persisted -- a bug that silently dropped branch_id on
+//     create wouldn't be caught by the create-form interaction alone.
 // A disposable diagnostic spec run during development (routing the
 // branches PATCH to force a 500) confirmed this is a real, reproducible
 // false-pass for an immediate no-wait assertion -- not just a theoretical
@@ -89,6 +96,12 @@ test("super_admin can create/rename a branch and create/change-role a user assig
     page.getByRole("button", { name: "Anlegen" }).click(),
   ]);
   expect(createResponse.ok(), `branch create POST failed: ${createResponse.status()}`).toBe(true);
+  // The created branch's id -- the real foreign key AdminUsersPage's row
+  // <select value={user.branch_id ?? ""}> options carry -- captured
+  // straight from the server's own response body, so later checks of the
+  // new user's branch assignment can compare against ground truth rather
+  // than the UI's rendered label.
+  const branchId: string = (await createResponse.json()).id;
 
   const renameInput = await locateBranchRenameInputByValue(page, branchName);
   const [renamePatchResponse] = await Promise.all([
@@ -123,13 +136,36 @@ test("super_admin can create/rename a branch and create/change-role a user assig
   // proves the branch created above is the one actually assigned to the
   // new user.
   await page.locator("form").getByLabel("Filiale").selectOption({ label: renamedBranchName });
-  await page.getByRole("button", { name: "Benutzer anlegen" }).click();
+  const [createUserResponse] = await Promise.all([
+    page.waitForResponse(
+      (resp) => resp.request().method() === "POST" && /\/api\/admin\/users$/.test(resp.url())
+    ),
+    page.getByRole("button", { name: "Benutzer anlegen" }).click(),
+  ]);
+  expect(createUserResponse.ok(), `user create POST failed: ${createUserResponse.status()}`).toBe(true);
 
-  // Unlike the two checks above, this one isn't racy: the row for this
-  // *brand-new* user cannot exist in the DOM at all until createUser()'s
-  // POST resolves and setUsers() adds it to React state -- there is no
-  // optimistic/local-only rendering path that could make it appear early.
+  // Unlike the rename/role-change checks below, this one isn't racy on its
+  // own: the row for this *brand-new* user cannot exist in the DOM at all
+  // until createUser()'s POST resolves and setUsers() adds it to React
+  // state -- there is no optimistic/local-only rendering path that could
+  // make it appear early.
   await expect(page.getByText(userEmail)).toBeVisible();
+
+  // selectOption({ label }) on the create form only proves that <option>
+  // existed in the DOM at selection time -- it says nothing about whether
+  // branchId state was correctly captured, sent in the POST body, or
+  // actually persisted server-side. A bug that silently dropped branch_id
+  // on create wouldn't be caught by the create-form interaction alone.
+  // listUsers() (backend/app/db/repositories/user_repository.py) orders by
+  // User.email, not creation order, so -- as with the branch rows -- row
+  // position can't be assumed; hasText(userEmail) (unique per run) already
+  // sidesteps that. Reload for a fresh GET /api/admin/users, then check
+  // the row's branch <select> by *value* (the branch's id, the real
+  // foreign key captured above) rather than by the rendered option label.
+  await page.reload();
+  const newUserRow = page.locator("tr", { hasText: userEmail });
+  const branchSelect = newUserRow.locator("select").nth(1);
+  await expect(branchSelect).toHaveValue(branchId);
 
   const userRow = page.locator("tr", { hasText: userEmail });
   const roleSelect = userRow.locator("select").first();
