@@ -90,11 +90,23 @@ test("a doctor's conversation is invisible to same-branch staff until conversati
   // the backend actually returned the conversation with is_own: false --
   // this specifically proves the *doctor's* conversation was fetched, not
   // just that some page rendered.
+  //
+  // This only asserts "at least one" badge, not an exact count: the doctor
+  // account is shared across spec files against the one ephemeral tenant
+  // global-setup.ts provisions per full run, and other specs (e.g.
+  // chat-roundtrip.spec.ts) create their own conversations for the same
+  // doctor. When those run in the same suite invocation, staff's newly
+  // granted branch-wide visibility surfaces all of them, each carrying the
+  // same owner-handle badge text, so the count is no longer guaranteed to be
+  // 1. The specific-conversation check below (navigating to `conversationId`
+  // captured in step 1, then checking the read-only banner + doctor's email)
+  // already proves *this* conversation resolves correctly for staff, so the
+  // visibility claim stays fully covered.
   const staffContext2 = await browser.newContext();
   const staffPage2 = await staffContext2.newPage();
   await injectSession(staffContext2, await getRopcTokens(staff.email, staff.password));
   await staffPage2.goto("/apps/anonymization");
-  await expect(staffPage2.getByText(doctorHandle)).toHaveCount(1);
+  await expect(staffPage2.getByText(doctorHandle).first()).toBeVisible();
   await staffPage2.goto(`/apps/anonymization/c/${conversationId}`);
   await expect(staffPage2.getByText(/Schreibgeschützt/)).toBeVisible();
   await expect(staffPage2.getByText(doctor.email)).toBeVisible();
