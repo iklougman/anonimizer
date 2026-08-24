@@ -10,9 +10,14 @@ INTERVAL_SECONDS=3
 elapsed=0
 
 check() {
-  curl -sf http://localhost:8000/health > /dev/null 2>&1 \
-    && curl -sf http://localhost:3000 > /dev/null 2>&1 \
-    && curl -sf "http://localhost:8080/realms/chatgpt-proxy-dev" > /dev/null 2>&1
+  # --max-time bounds each individual curl call -- without it, a connection
+  # that's accepted but never responds (observed in practice: a stopped-then-
+  # restarting container, or a loaded Docker host) can hang past this
+  # script's own TIMEOUT_SECONDS entirely, since the elapsed-time check below
+  # only runs *between* check() calls, never inside a hung one.
+  curl -sf --max-time 5 http://localhost:8000/health > /dev/null 2>&1 \
+    && curl -sf --max-time 5 http://localhost:3000 > /dev/null 2>&1 \
+    && curl -sf --max-time 5 "http://localhost:8080/realms/chatgpt-proxy-dev" > /dev/null 2>&1
 }
 
 echo "Waiting for backend/frontend/keycloak to become healthy (timeout: ${TIMEOUT_SECONDS}s)..."
