@@ -40,6 +40,17 @@ test("a doctor's conversation is invisible to same-branch staff until conversati
   await injectSession(staffContext, await getRopcTokens(staff.email, staff.password));
   await staffPage.goto("/apps/anonymization");
   await expect(staffPage.getByRole("button", { name: "Neue Anfrage" })).toBeVisible();
+  // `getByText(doctorHandle).toHaveCount(0)` below is a web-first assertion:
+  // it succeeds the instant zero matches are in the DOM, which is also true
+  // of ConversationSidebar's pre-fetch loading-skeleton state (rendered
+  // while `conversations === null`, before listConversations() -- a fetch
+  // uncoordinated with the useMe() call the "Neue Anfrage" button above
+  // depends on -- has resolved). Without waiting the skeleton away first, a
+  // genuinely broken RBAC check could false-pass by sampling the DOM before
+  // the conversations list request settles. Waiting for the skeleton to be
+  // gone is a real signal the list actually loaded, not just "shows nothing
+  // right now".
+  await expect(staffPage.locator('[class*="skeletonList"]')).toBeHidden();
   await expect(staffPage.getByText(doctorHandle)).toHaveCount(0);
   await staffContext.close();
 
@@ -58,6 +69,11 @@ test("a doctor's conversation is invisible to same-branch staff until conversati
   // the "Personal" (staff) column by its header text.
   const headerTexts = await adminPage.locator("table thead th").allTextContents();
   const staffColumnIndex = headerTexts.findIndex((text) => text.includes("Personal"));
+  // > 0 (not just >= 0): index 0 is the empty <th> above the permission-label
+  // column (page.tsx's leading `<th></th>`), which can never legitimately be
+  // "Personal" -- findIndex returning 0 here would mean the header text
+  // wasn't found at all, same as -1, and should fail loudly rather than
+  // silently index into the wrong column.
   expect(staffColumnIndex, `"Personal" column not found in header: ${JSON.stringify(headerTexts)}`).toBeGreaterThan(0);
 
   const branchRow = adminPage.locator("tr", { hasText: "Sichtbarkeit Filiale" });
