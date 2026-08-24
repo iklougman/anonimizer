@@ -148,11 +148,26 @@ def cleanup(tenant_id: uuid.UUID, use_fake_keycloak_client: bool) -> int:
         for subject in users:
             keycloak_client.delete_user(subject)
 
+        # token_mappings/llm_requests/audit_events all carry hard (non-cascading)
+        # composite FKs to conversations (app/models/token_mapping.py,
+        # llm_request.py, audit_event.py) -- app/api/chat.py writes llm_requests
+        # on every successful turn and audit_events on every leakage/unresolved-
+        # token error, so any tenant that ran a real e2e suite has rows here.
+        # token_mappings also FKs to tenant_keys via dek_id, so it must clear
+        # before the tenant_keys delete below too -- doing it here (ahead of
+        # conversations) satisfies both.
+        session.execute(sa.text("DELETE FROM token_mappings WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
+        session.execute(sa.text("DELETE FROM llm_requests WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
+        session.execute(sa.text("DELETE FROM audit_events WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
         session.execute(sa.text("DELETE FROM messages WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
         session.execute(sa.text("DELETE FROM conversations WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
         session.execute(sa.text("DELETE FROM users WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
-        session.execute(sa.text("DELETE FROM branches WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
+        # tenant_app_assignments FKs to branches via branch_id (nullable; always
+        # NULL for assignments this script creates, but deleting it before
+        # branches defensively holds even if a future change adds a
+        # branch-scoped assignment).
         session.execute(sa.text("DELETE FROM tenant_app_assignments WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
+        session.execute(sa.text("DELETE FROM branches WHERE tenant_id = :tenant_id"), {"tenant_id": str(tenant_id)})
 
     engine = sa.create_engine(get_settings().database_url)
     with engine.begin() as connection:

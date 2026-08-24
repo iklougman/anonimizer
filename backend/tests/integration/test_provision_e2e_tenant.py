@@ -1,3 +1,4 @@
+import decimal
 import json
 import subprocess
 import sys
@@ -7,6 +8,10 @@ import pytest
 import sqlalchemy as sa
 
 from app.config import get_settings
+from app.db.repositories.audit_event_repository import AuditEventRepository
+from app.db.repositories.conversation_repository import ConversationRepository
+from app.db.repositories.llm_request_repository import LLMRequestRepository
+from app.db.repositories.message_repository import MessageRepository
 from app.db.session import SessionLocal, tenant_scoped_session
 from app.models import Branch, Tenant, User
 
@@ -86,6 +91,72 @@ def test_cleanup_removes_tenant_and_all_its_rows(fake_keycloak_admin_client):
 
     with SessionLocal() as session:
         assert session.get(Tenant, tenant_id) is None
+
+
+def test_cleanup_succeeds_for_a_tenant_with_real_chat_activity(fake_keycloak_admin_client):
+    """Regression test for the review finding: cleanup() used to delete
+    messages/conversations/users/branches/tenant_app_assignments but never
+    touched llm_requests/audit_events/token_mappings, all of which carry hard
+    (non-cascading) composite FKs to conversations -- so any tenant that had
+    actually run through app/api/chat.py (llm_requests on every successful
+    turn, audit_events on every leakage/unresolved-token error) made cleanup
+    fail with a ForeignKeyViolation on `conversations`. This reproduces that
+    exact shape via the real repositories chat.py itself uses, then asserts
+    cleanup now exits 0 and the tenant is fully gone."""
+    result = _run_script("create", "--fake-keycloak-client")
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    tenant_id = uuid.UUID(payload["tenant_id"])
+    doctor_user_id = uuid.UUID(payload["users"]["doctor"]["user_id"])
+
+    with tenant_scoped_session(tenant_id) as session:
+        conversation = ConversationRepository(session).create(tenant_id, doctor_user_id)
+        conversation_id = conversation.id
+
+        MessageRepository(session).create(
+            tenant_id, conversation_id, role="user", sanitized_content="hello [PERSON_1]"
+        )
+        MessageRepository(session).create(
+            tenant_id, conversation_id, role="assistant", sanitized_content="hi [PERSON_1], how can I help?"
+        )
+
+        LLMRequestRepository(session).create(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            provider="openai",
+            model="gpt-4o",
+            sanitized_prompt="hello [PERSON_1]",
+            sanitized_response="hi [PERSON_1], how can I help?",
+            tokens_in=5,
+            tokens_out=8,
+            cost_usd=decimal.Decimal("0.000123"),
+            latency_ms=250,
+        )
+
+        AuditEventRepository(session).create(
+            tenant_id=tenant_id,
+            conversation_id=conversation_id,
+            event_type="UnresolvedTokenError",
+            entity_type="UNKNOWN",
+            token="[PERSON_99]",
+            actor=str(doctor_user_id),
+        )
+
+    cleanup_result = _run_script("cleanup", "--tenant-id", str(tenant_id), "--fake-keycloak-client")
+    assert cleanup_result.returncode == 0, cleanup_result.stderr
+
+    with SessionLocal() as session:
+        assert session.get(Tenant, tenant_id) is None
+
+    admin_engine = sa.create_engine(get_settings().database_url)
+    with admin_engine.connect() as connection:
+        for table in ("llm_requests", "audit_events", "conversations", "messages", "token_mappings"):
+            remaining = connection.execute(
+                sa.text(f"SELECT count(*) FROM {table} WHERE tenant_id = :tenant_id"),
+                {"tenant_id": str(tenant_id)},
+            ).scalar_one()
+            assert remaining == 0, f"{table} still has rows for cleaned-up tenant {tenant_id}"
+    admin_engine.dispose()
 
 
 def test_repeated_create_generates_distinct_tenants(fake_keycloak_admin_client):
