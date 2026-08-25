@@ -30,6 +30,12 @@ jobs:
       DATABASE_URL: postgresql+psycopg://chatgpt_proxy:change-me@localhost:5432/chatgpt_proxy
       MASTER_KEY_PATH: /tmp/ci-master.key
       APP_RUNTIME_PASSWORD: change-me-app-runtime
+      # Required since Settings.app_ops_password became a mandatory field
+      # (migration 0007 provisions the app_ops Postgres role with it) --
+      # this job's env block was never updated to match, so `alembic
+      # upgrade head` has been failing on every run with a pydantic
+      # ValidationError since that change landed.
+      APP_OPS_PASSWORD: change-me-app-ops
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -58,7 +64,13 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: "20"
+          # jsdom 30.0.1 (package-lock.json) declares
+          # engines.node: "^22.22.2 || ^24.15.0 || >=26.0.0" -- Node 20
+          # (this job's prior pin) isn't in that range at all, so `npm
+          # test` (vitest, which loads jsdom) has been failing on every
+          # run with "webidl.util.markAsUncloneable is not a function"
+          # since jsdom was bumped to 30.x.
+          node-version: "24"
       - run: npm ci
       - run: npm test
       - run: npm run build
