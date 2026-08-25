@@ -92,6 +92,18 @@ jobs:
         run: |
           sed -i 's/^ENVIRONMENT=.*/ENVIRONMENT=test/' .env
           echo "LLM_PROVIDER=stub" >> .env
+          # UVICORN_WORKERS defaults to 4 (docker-compose.yml), sized for a
+          # real deployment host. Each worker is a separate process that
+          # loads its own full copy of the German spaCy model -- 4 of them
+          # under the backend service's 2g memory limit (docker-compose.yml)
+          # OOM-crash-loops the workers (confirmed: "Started server
+          # process"/"Child process died" cycling with no Python traceback
+          # in `docker compose logs`, consistent with SIGKILL). A throwaway
+          # e2e stack handling a handful of test requests needs none of that
+          # parallelism -- one worker is what every local verification run
+          # of this suite has used all along (docker-compose.override.yml's
+          # dev command implies a single worker via --reload).
+          echo "UVICORN_WORKERS=1" >> .env
           # keycloak/realm-export.json ships a fixed, non-secret dev credential
           # for the confidential chatgpt-proxy-backend-admin service-account
           # client. .env.example leaves this blank so a real deployment must
