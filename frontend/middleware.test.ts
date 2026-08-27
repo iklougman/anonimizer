@@ -35,4 +35,12 @@ describe("middleware", () => {
   it("matcher excludes the NextAuth API routes", () => {
     expect(config.matcher).not.toContain("/api/auth/:path*");
   });
+
+  it("matcher excludes /login and /signup from the auth gate", () => {
+    const matcherRegex = new RegExp(config.matcher[0]);
+    expect(matcherRegex.test("/login")).toBe(false);
+    expect(matcherRegex.test("/signup")).toBe(false);
+    // Sanity: the matcher still gates ordinary routes.
+    expect(matcherRegex.test("/dashboard")).toBe(true);
+  });
 });

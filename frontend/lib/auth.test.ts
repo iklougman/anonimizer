@@ -14,6 +14,10 @@ describe("authOptions", () => {
     );
   });
 
+  it("points NextAuth's sign-in page at the app's own /login route", () => {
+    expect(authOptions.pages?.signIn).toBe("/login");
+  });
+
   describe("jwt callback", () => {
     it("stores the access token, refresh token, and expiry on initial sign-in", async () => {
       const token = await authOptions.callbacks!.jwt!({

@@ -79,6 +79,9 @@ export const authOptions: NextAuthOptions = {
       return session;
     },
   },
+  pages: {
+    signIn: "/login",
+  },
   events: {
     async signOut({ token }) {
       // RP-initiated back-channel logout: ends the Keycloak SSO session so

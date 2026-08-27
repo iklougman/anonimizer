@@ -140,7 +140,7 @@ export function AppShellChrome({ children }: { children: ReactNode }) {
                     Profil
                   </Menu.Item>
                   <Menu.Divider />
-                  <Menu.Item leftSection={<IconLogout size={14} />} color="red" onClick={() => signOut()}>
+                  <Menu.Item leftSection={<IconLogout size={14} />} color="red" onClick={() => signOut({ callbackUrl: "/login" })}>
                     Abmelden
                   </Menu.Item>
                 </Menu.Dropdown>
