@@ -2,6 +2,7 @@
 
 import { SessionProvider } from "next-auth/react";
 import type { ReactNode } from "react";
+import { SessionErrorHandler } from "@/components/SessionErrorHandler";
 
 export function SessionProviderWrapper({ children }: { children: ReactNode }) {
   // Without this, the client only re-fetches /api/auth/session (and so only
@@ -11,5 +12,10 @@ export function SessionProviderWrapper({ children }: { children: ReactNode }) {
   // typing a message hits a stale token and every API call 401s with no
   // recovery. Polling well under that lifespan keeps the token refreshed
   // before it goes stale.
-  return <SessionProvider refetchInterval={60}>{children}</SessionProvider>;
+  return (
+    <SessionProvider refetchInterval={60}>
+      <SessionErrorHandler />
+      {children}
+    </SessionProvider>
+  );
 }

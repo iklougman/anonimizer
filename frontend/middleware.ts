@@ -5,7 +5,7 @@ import type { NextRequest } from "next/server";
 export async function middleware(request: NextRequest) {
   const token = await getToken({ req: request, secret: process.env.NEXTAUTH_SECRET });
 
-  if (!token) {
+  if (!token || token.error === "RefreshAccessTokenError") {
     // request.url's origin is not reliable when the app runs behind a remapped
     // host port (e.g. FRONTEND_PORT=3100 while Next.js listens on 3000 inside
     // the container): Next.js resolves it from the container's own bind port,

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState, type KeyboardEvent } from "react";
-import { signIn, useSession } from "next-auth/react";
+import { useSession } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
 import { IconMessage2, IconPlus, IconTrash } from "@tabler/icons-react";
 import {
@@ -28,15 +28,6 @@ export function ConversationSidebar() {
   // than briefly flashing enabled -- fails closed on the loading state too.
   const canCreate = me?.permissions.includes("conversations:create") ?? false;
   const canDeleteAny = me?.permissions.includes("conversations:delete:any") ?? false;
-
-  useEffect(() => {
-    // A refresh failure (e.g. the Keycloak refresh token itself expired)
-    // leaves session.accessToken stale -- every API call would 401 forever
-    // with no recovery. Force a fresh login rather than let that happen.
-    if (session?.error === "RefreshAccessTokenError") {
-      signIn("keycloak");
-    }
-  }, [session?.error]);
 
   useEffect(() => {
     if (!session?.accessToken) return;
