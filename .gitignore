@@ -25,3 +25,12 @@ secrets/
 
 # Superpowers brainstorming companion (local mockup sessions)
 .superpowers/
+
+# e2e (Playwright)
+e2e/node_modules/
+e2e/test-results/
+e2e/playwright-report/
+e2e/.e2e-tenant.json
+
+# unrelated leftover debug artifacts
+.playwright-mcp/
