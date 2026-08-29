@@ -3772,7 +3772,7 @@ git commit -m "feat: add the documents app route tree (layout, empty state, deta
 
 **Interfaces:**
 - Consumes: `useAvailableApps()` (existing `AvailableAppsProvider`), `listDocuments` (Task 12).
-- Produces: `Composer({ onSend: (content: string, documentIds: string[], documentFilenames: string[]) => void, disabled })` (three-argument `onSend` — see Task 16 Step 4's retroactive extension); `sendMessage(..., documentIds?: string[])` gaining a 5th argument.
+- Produces: `Composer({ onSend: (content: string, documentIds: string[], documentFilenames: string[]) => void, disabled })` (three-argument `onSend` from the start — `documentFilenames` lets Task 16 show a chip on the optimistic message without re-deriving filenames from ids); `sendMessage(..., documentIds?: string[])` gaining a 5th argument.
 
 - [ ] **Step 1: Extend `sendMessage` in `lib/api/chat.ts` to accept `documentIds`**
 
