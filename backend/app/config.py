@@ -107,6 +107,13 @@ class Settings(BaseSettings):
         )
         return url.render_as_string(hide_password=False)
 
+    @property
+    def app_ops_database_url(self) -> str:
+        url = make_url(self.database_url).set(
+            username="app_ops", password=self.app_ops_password
+        )
+        return url.render_as_string(hide_password=False)
+
 
 @lru_cache
 def get_settings() -> Settings:

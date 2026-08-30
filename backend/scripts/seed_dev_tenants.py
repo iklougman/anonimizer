@@ -14,7 +14,10 @@ from __future__ import annotations
 
 import uuid
 
+from sqlalchemy import create_engine, text
+
 from app.config import get_settings
+from app.db.repositories.app_entitlement_repository import AppEntitlementRepository
 from app.db.repositories.branch_repository import BranchRepository
 from app.db.repositories.tenant_repository import TenantRepository
 from app.db.repositories.user_repository import UserRepository
@@ -70,6 +73,33 @@ DEV_TENANTS = [
         ],
     },
 ]
+
+
+def _grant_all_entitlements(tenant_id: uuid.UUID, app_ids: list[uuid.UUID]) -> None:
+    """tenant_app_entitlements is app_ops-only for writes (app_runtime has
+    SELECT-only there, migration 0007's "FastAPI never writes this table"),
+    so -- unlike everything else in this script -- this can't go through
+    tenant_scoped_session/app_runtime and needs its own app_ops connection.
+    """
+    engine = create_engine(get_settings().app_ops_database_url)
+    try:
+        with engine.begin() as conn:
+            for app_id in app_ids:
+                conn.execute(
+                    text(
+                        "INSERT INTO tenant_app_entitlements (id, tenant_id, app_id, granted_by, granted_at) "
+                        "VALUES (:id, :tenant_id, :app_id, :granted_by, now()) "
+                        "ON CONFLICT (tenant_id, app_id) DO UPDATE SET revoked_at = NULL"
+                    ),
+                    {
+                        "id": uuid.uuid4(),
+                        "tenant_id": tenant_id,
+                        "app_id": app_id,
+                        "granted_by": "seed_dev_tenants",
+                    },
+                )
+    finally:
+        engine.dispose()
 
 
 def main() -> int:
@@ -140,6 +170,18 @@ def main() -> int:
                     branch_id=branch.id if branch is not None else None,
                 )
                 print(f"{entry['name']}: seeded user {user_entry['email']} ({user_entry['role']})")
+
+            # Every dev tenant gets every catalog app, tenant-wide -- dev/demo
+            # data should exercise every app, not just whatever migration
+            # 0007's backfill happened to cover at the time it ran.
+            apps_repo = AppEntitlementRepository(session)
+            catalog_apps = apps_repo.list_catalog()
+            _grant_all_entitlements(tenant_id, [app.id for app in catalog_apps])
+            for app in catalog_apps:
+                apps_repo.upsert_assignment(
+                    tenant_id, app.id, branch_id=None, is_enabled=True, assigned_by=None
+                )
+            print(f"{entry['name']}: entitled + enabled {[app.key for app in catalog_apps]}")
     return 0
 
 
