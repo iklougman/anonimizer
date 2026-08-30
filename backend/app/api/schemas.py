@@ -82,6 +82,19 @@ class AdminUserCreateOut(AdminUserOut):
     invite_email_sent: bool
 
 
+class TenantSignupIn(BaseModel):
+    practice_name: str
+    first_name: str
+    last_name: str
+    email: str
+    password: str
+
+
+class TenantSignupOut(BaseModel):
+    tenant_id: uuid.UUID
+    verification_email_sent: bool
+
+
 class AdminUserUpdateIn(BaseModel):
     """All fields optional (PATCH semantics). `branch_id: null` in the request
     body explicitly clears the branch; the endpoint distinguishes that from

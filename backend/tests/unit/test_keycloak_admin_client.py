@@ -168,3 +168,168 @@ def test_set_password_raises_keycloak_admin_error_on_failure():
 
     with pytest.raises(KeycloakAdminError):
         admin.set_password("subject-123", "a-real-password")
+
+
+def test_logout_user_calls_the_session_revocation_endpoint():
+    seen: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/token"):
+            return _token_response()
+        seen["request"] = request
+        return httpx.Response(204)
+
+    admin = KeycloakAdminClient(
+        base_url="http://keycloak",
+        realm="dev",
+        client_id="backend-admin",
+        client_secret="s3cret",
+        http_client=_client(handler),
+    )
+
+    admin.logout_user("subject-123")
+
+    request = seen["request"]
+    assert request.method == "POST"
+    assert request.url.path == "/admin/realms/dev/users/subject-123/logout"
+    assert request.headers["authorization"] == "Bearer admin-tok"
+
+
+def test_logout_user_raises_keycloak_admin_error_on_failure():
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/token"):
+            return _token_response()
+        raise httpx.ConnectError("boom", request=request)
+
+    admin = KeycloakAdminClient(
+        base_url="http://keycloak",
+        realm="dev",
+        client_id="backend-admin",
+        client_secret="s3cret",
+        http_client=_client(handler),
+    )
+
+    with pytest.raises(KeycloakAdminError, match="logout_user"):
+        admin.logout_user("subject-123")
+
+
+def test_send_required_actions_email_posts_the_given_actions():
+    seen: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/token"):
+            return _token_response()
+        seen["request"] = request
+        return httpx.Response(204)
+
+    admin = KeycloakAdminClient(
+        base_url="http://keycloak",
+        realm="dev",
+        client_id="backend-admin",
+        client_secret="s3cret",
+        http_client=_client(handler),
+    )
+
+    admin.send_required_actions_email("subject-123", ["VERIFY_EMAIL"])
+
+    request = seen["request"]
+    assert request.method == "PUT"
+    assert request.url.path == "/admin/realms/dev/users/subject-123/execute-actions-email"
+    import json
+
+    body = json.loads(request.content)
+    assert body == ["VERIFY_EMAIL"]
+
+
+def test_send_invite_still_sends_update_password():
+    seen: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/token"):
+            return _token_response()
+        seen["request"] = request
+        return httpx.Response(204)
+
+    admin = KeycloakAdminClient(
+        base_url="http://keycloak",
+        realm="dev",
+        client_id="backend-admin",
+        client_secret="s3cret",
+        http_client=_client(handler),
+    )
+
+    admin.send_invite("subject-123")
+
+    request = seen["request"]
+    import json
+
+    body = json.loads(request.content)
+    assert body == ["UPDATE_PASSWORD"]
+
+
+def test_create_user_defaults_to_update_password_required_action():
+    seen: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/token"):
+            return _token_response()
+        if request.url.path.endswith("/users"):
+            seen["request"] = request
+            return httpx.Response(
+                201,
+                headers={"Location": "http://keycloak/admin/realms/dev/users/subject-abc"},
+            )
+        return httpx.Response(200)
+
+    admin = KeycloakAdminClient(
+        base_url="http://keycloak",
+        realm="dev",
+        client_id="backend-admin",
+        client_secret="s3cret",
+        http_client=_client(handler),
+    )
+
+    admin.create_user(email="a@b.com", first_name="A", last_name="B", tenant_id="t1")
+
+    request = seen["request"]
+    import json
+
+    body = json.loads(request.content)
+    assert body["requiredActions"] == ["UPDATE_PASSWORD"]
+
+
+def test_create_user_accepts_a_different_required_actions_list():
+    seen: dict[str, httpx.Request] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("/token"):
+            return _token_response()
+        if request.url.path.endswith("/users"):
+            seen["request"] = request
+            return httpx.Response(
+                201,
+                headers={"Location": "http://keycloak/admin/realms/dev/users/subject-abc"},
+            )
+        return httpx.Response(200)
+
+    admin = KeycloakAdminClient(
+        base_url="http://keycloak",
+        realm="dev",
+        client_id="backend-admin",
+        client_secret="s3cret",
+        http_client=_client(handler),
+    )
+
+    admin.create_user(
+        email="a@b.com",
+        first_name="A",
+        last_name="B",
+        tenant_id="t1",
+        required_actions=["VERIFY_EMAIL"],
+    )
+
+    request = seen["request"]
+    import json
+
+    body = json.loads(request.content)
+    assert body["requiredActions"] == ["VERIFY_EMAIL"]

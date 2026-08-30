@@ -45,6 +45,10 @@ class Settings(BaseSettings):
     # reference sets instead, so it turns the warm-up off.
     warm_reference_data_on_startup: bool = True
 
+    # Public, unauthenticated endpoint (signup) abuse guard -- see
+    # app/api/rate_limit.py's docstring for the accepted MVP limitation.
+    signup_rate_limit_per_hour: int = 5
+
     # Backend-chat-slice design doc §2: two separate Keycloak URLs because inside
     # Docker Compose the backend reaches Keycloak via the service name, while the
     # browser (and therefore the token's `iss` claim) uses localhost.

@@ -14,6 +14,10 @@ describe("authOptions", () => {
     );
   });
 
+  it("points NextAuth's sign-in page at the app's own /login route", () => {
+    expect(authOptions.pages?.signIn).toBe("/login");
+  });
+
   describe("jwt callback", () => {
     it("stores the access token, refresh token, and expiry on initial sign-in", async () => {
       const token = await authOptions.callbacks!.jwt!({
@@ -98,6 +102,32 @@ describe("authOptions", () => {
 
       expect(session.accessToken).toBe("at-1");
       expect(session.error).toBe("RefreshAccessTokenError");
+    });
+  });
+
+  describe("events.signOut", () => {
+    it("posts a back-channel logout request to Keycloak with the refresh token", async () => {
+      const fetchMock = vi.fn().mockResolvedValue({ ok: true });
+      vi.stubGlobal("fetch", fetchMock);
+
+      await authOptions.events!.signOut!({ token: { refreshToken: "rt-123" } } as any);
+
+      expect(fetchMock).toHaveBeenCalledWith(
+        "http://keycloak:8080/realms/chatgpt-proxy-dev/protocol/openid-connect/logout",
+        expect.objectContaining({ method: "POST" })
+      );
+      const body = fetchMock.mock.calls[0][1].body as URLSearchParams;
+      expect(body.get("refresh_token")).toBe("rt-123");
+      vi.unstubAllGlobals();
+    });
+
+    it("does not throw when the back-channel call fails", async () => {
+      vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("network down")));
+
+      await expect(
+        authOptions.events!.signOut!({ token: { refreshToken: "rt-123" } } as any)
+      ).resolves.not.toThrow();
+      vi.unstubAllGlobals();
     });
   });
 });

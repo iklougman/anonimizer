@@ -11,6 +11,13 @@ from jwt.algorithms import RSAAlgorithm
 # network round-trip (and a Keycloak outage) on every single authenticated request.
 _JWKS_CACHE_TTL_SECONDS = 300
 
+# When a token's kid isn't found in the cached JWKS, we force one fresh fetch so a
+# genuine key rotation doesn't reject valid tokens for up to _JWKS_CACHE_TTL_SECONDS.
+# This cooldown bounds how often that forced fetch can happen, since the trigger
+# (an unrecognized kid) is attacker-controlled and could otherwise be used to flood
+# Keycloak with JWKS requests.
+_FORCED_REFRESH_COOLDOWN_SECONDS = 5
+
 
 class KeycloakUnreachableError(Exception):
     """The JWKS endpoint could not be reached. ADR-0020/0021: fail closed, no
@@ -46,6 +53,7 @@ class JWTValidator:
         self._http_client = http_client if http_client is not None else httpx.Client(timeout=5.0)
         self._jwks_cache: dict[str, object] | None = None
         self._jwks_cached_at: float = 0.0
+        self._last_forced_refresh_at: float = 0.0
 
     def validate(self, token: str) -> TokenClaims:
         jwks = self._get_jwks()
@@ -56,6 +64,16 @@ class JWTValidator:
             raise InvalidTokenError(f"malformed token: {exc}") from exc
 
         key = next((k for k in jwks["keys"] if k.get("kid") == header.get("kid")), None)
+        if key is None:
+            # The kid isn't in our cached JWKS. This could be a genuine key rotation
+            # on Keycloak's side, so force one fresh fetch before giving up -- but only
+            # if we haven't already forced a refresh recently, since an attacker can
+            # trivially trigger this path by sending a bogus kid.
+            now = time.monotonic()
+            if now - self._last_forced_refresh_at >= _FORCED_REFRESH_COOLDOWN_SECONDS:
+                self._last_forced_refresh_at = now
+                jwks = self._get_jwks(force_refresh=True)
+                key = next((k for k in jwks["keys"] if k.get("kid") == header.get("kid")), None)
         if key is None:
             raise InvalidTokenError(f"no signing key found for kid={header.get('kid')!r}")
         public_key = RSAAlgorithm.from_jwk(key)
@@ -84,9 +102,13 @@ class JWTValidator:
 
         return TokenClaims(tenant_id=tenant_id, keycloak_subject=keycloak_subject)
 
-    def _get_jwks(self) -> dict[str, object]:
+    def _get_jwks(self, force_refresh: bool = False) -> dict[str, object]:
         now = time.monotonic()
-        if self._jwks_cache is not None and now - self._jwks_cached_at < _JWKS_CACHE_TTL_SECONDS:
+        if (
+            not force_refresh
+            and self._jwks_cache is not None
+            and now - self._jwks_cached_at < _JWKS_CACHE_TTL_SECONDS
+        ):
             return self._jwks_cache
         try:
             response = self._http_client.get(self._jwks_url)

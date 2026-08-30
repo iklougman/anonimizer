@@ -6,6 +6,7 @@ const KEYCLOAK_ISSUER = process.env.KEYCLOAK_ISSUER!;
 const KEYCLOAK_INTERNAL_URL = process.env.KEYCLOAK_INTERNAL_URL!;
 const KEYCLOAK_CLIENT_ID = process.env.KEYCLOAK_CLIENT_ID!;
 const KEYCLOAK_TOKEN_URL = `${KEYCLOAK_INTERNAL_URL}/protocol/openid-connect/token`;
+const KEYCLOAK_LOGOUT_URL = `${KEYCLOAK_INTERNAL_URL}/protocol/openid-connect/logout`;
 
 // 30s of slack before real expiry, so a request in flight doesn't race a token
 // that expires mid-call.
@@ -48,7 +49,7 @@ export const authOptions: NextAuthOptions = {
       wellKnown: undefined,
       authorization: {
         url: `${KEYCLOAK_ISSUER}/protocol/openid-connect/auth`,
-        params: { scope: "openid email profile" },
+        params: { scope: "openid email profile offline_access" },
       },
       token: KEYCLOAK_TOKEN_URL,
       userinfo: `${KEYCLOAK_INTERNAL_URL}/protocol/openid-connect/userinfo`,
@@ -76,6 +77,30 @@ export const authOptions: NextAuthOptions = {
       session.accessToken = token.accessToken ?? "";
       session.error = token.error;
       return session;
+    },
+  },
+  pages: {
+    signIn: "/login",
+  },
+  events: {
+    async signOut({ token }) {
+      // RP-initiated back-channel logout: ends the Keycloak SSO session so
+      // a subsequent sign-in can't silently re-authenticate off a still-live
+      // Keycloak cookie. Best-effort -- ADR-0020's fail-closed policy governs
+      // auth *issuance*, not this teardown call; a failure here must never
+      // block the user's own local sign-out from completing.
+      try {
+        await fetch(KEYCLOAK_LOGOUT_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/x-www-form-urlencoded" },
+          body: new URLSearchParams({
+            client_id: KEYCLOAK_CLIENT_ID,
+            refresh_token: token.refreshToken ?? "",
+          }),
+        });
+      } catch {
+        // Swallowed deliberately -- see comment above.
+      }
     },
   },
 };

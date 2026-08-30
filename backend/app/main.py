@@ -11,6 +11,7 @@ from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.health import router as health_router
 from app.api.me import router as me_router
+from app.api.signup import router as signup_router
 from app.config import get_settings
 from app.logging_config import configure_logging
 from app.privacy_gateway.pipeline import get_pipeline
@@ -58,3 +59,4 @@ app.include_router(admin_router)
 app.include_router(admin_apps_router)
 app.include_router(conversations_router)
 app.include_router(chat_router)
+app.include_router(signup_router)

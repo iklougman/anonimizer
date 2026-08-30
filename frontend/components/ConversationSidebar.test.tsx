@@ -4,7 +4,6 @@ import userEvent from "@testing-library/user-event";
 
 vi.mock("next-auth/react", () => ({
   useSession: () => ({ data: { accessToken: "token-123" } }),
-  signIn: vi.fn(),
 }));
 
 const mockRouterPush = vi.fn();

@@ -161,6 +161,7 @@ class _FakeAdminClient:
         self.create_error = create_error
         self.deleted = []
         self.invited = []
+        self.logout_user_calls = []
 
     def create_user(self, email, first_name, last_name, tenant_id):
         if self.create_error is not None:
@@ -175,6 +176,9 @@ class _FakeAdminClient:
 
     def set_enabled(self, subject, enabled):
         pass
+
+    def logout_user(self, subject):
+        self.logout_user_calls.append(subject)
 
 
 def test_create_user_provisioning_mode_uses_admin_client():
@@ -271,6 +275,37 @@ def test_can_deactivate_a_non_admin_user():
     response = client.patch(f"/api/admin/users/{staff_id}", json={"is_active": False})
     assert response.status_code == 200
     assert response.json()["is_active"] is False
+
+
+def test_deactivating_a_user_calls_logout_user():
+    tenant_id = _create_tenant()
+    admin_id = _create_user(tenant_id, role="super_admin")
+    staff_id = _create_user(tenant_id, role="staff")
+    fake = _FakeAdminClient()
+    app.dependency_overrides[get_keycloak_admin_client] = lambda: fake
+    client = _client_as(tenant_id, admin_id, "super_admin")
+
+    with tenant_scoped_session(tenant_id) as session:
+        staff_keycloak_subject = UserRepository(session).get(tenant_id, staff_id).keycloak_subject
+
+    response = client.patch(f"/api/admin/users/{staff_id}", json={"is_active": False})
+    assert response.status_code == 200
+    assert response.json()["is_active"] is False
+    assert fake.logout_user_calls == [staff_keycloak_subject]
+
+
+def test_reactivating_a_user_does_not_call_logout_user():
+    tenant_id = _create_tenant()
+    admin_id = _create_user(tenant_id, role="super_admin")
+    staff_id = _create_user(tenant_id, role="staff", is_active=False)
+    fake = _FakeAdminClient()
+    app.dependency_overrides[get_keycloak_admin_client] = lambda: fake
+    client = _client_as(tenant_id, admin_id, "super_admin")
+
+    response = client.patch(f"/api/admin/users/{staff_id}", json={"is_active": True})
+    assert response.status_code == 200
+    assert response.json()["is_active"] is True
+    assert fake.logout_user_calls == []
 
 
 def test_branch_id_can_be_explicitly_cleared():

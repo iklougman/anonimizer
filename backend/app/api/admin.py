@@ -235,6 +235,13 @@ def update_user(
     if body.is_active is not None and admin_client is not None:
         try:
             admin_client.set_enabled(target.keycloak_subject, body.is_active)
+            if body.is_active is False:
+                # Defense in depth, not the primary revocation mechanism --
+                # repo.update() above (DB is_active) already makes the next
+                # API request fail regardless of Keycloak session state.
+                # This just stops the account from silently refreshing or
+                # re-logging-in via Keycloak while disabled.
+                admin_client.logout_user(target.keycloak_subject)
         except KeycloakAdminError:
             # DB is_active is authoritative (the resolver rejects the next
             # request regardless); Keycloak-side sync is best-effort.

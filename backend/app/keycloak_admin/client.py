@@ -66,10 +66,21 @@ class KeycloakAdminClient:
         return {"Authorization": f"Bearer {self._access_token()}"}
 
     def create_user(
-        self, email: str, first_name: str, last_name: str, tenant_id: str
+        self,
+        email: str,
+        first_name: str,
+        last_name: str,
+        tenant_id: str,
+        required_actions: list[str] | None = None,
     ) -> str:
         """Creates a Keycloak user carrying the tenant_id attribute the JWT
-        validator reads, and returns its subject (Keycloak user id)."""
+        validator reads, and returns its subject (Keycloak user id).
+
+        `required_actions` defaults to UPDATE_PASSWORD (the admin-invite
+        shape: no password set yet, Keycloak forces one on first login).
+        The public self-signup flow passes ["VERIFY_EMAIL"] instead, since
+        it sets a real password immediately via set_password()."""
+        actions = required_actions if required_actions is not None else ["UPDATE_PASSWORD"]
         try:
             response = self._http_client.post(
                 f"{self._base_url}/admin/realms/{self._realm}/users",
@@ -81,7 +92,7 @@ class KeycloakAdminClient:
                     "lastName": last_name,
                     "enabled": True,
                     "emailVerified": False,
-                    "requiredActions": ["UPDATE_PASSWORD"],
+                    "requiredActions": actions,
                     "attributes": {"tenant_id": [tenant_id]},
                 },
             )
@@ -128,19 +139,37 @@ class KeycloakAdminClient:
         except httpx.HTTPError as exc:
             raise KeycloakAdminError(f"set_password({subject!r}) failed: {exc}") from exc
 
-    def send_invite(self, subject: str) -> None:
+    def send_required_actions_email(self, subject: str, actions: list[str]) -> None:
         try:
             response = self._http_client.put(
                 f"{self._base_url}/admin/realms/{self._realm}/users/{subject}/execute-actions-email",
                 headers=self._headers(),
-                json=["UPDATE_PASSWORD"],
+                json=actions,
             )
             response.raise_for_status()
         except httpx.HTTPError as exc:
             # Best-effort: dev/self-hosted Keycloak commonly has no SMTP
-            # configured. The caller reports invite_email_sent=false rather
-            # than failing the whole user-creation request over this.
-            raise KeycloakAdminError(f"send_invite({subject!r}) failed: {exc}") from exc
+            # configured. The caller reports the email as not-sent rather
+            # than failing the whole request over this.
+            raise KeycloakAdminError(f"send_required_actions_email({subject!r}, {actions}) failed: {exc}") from exc
+
+    def send_invite(self, subject: str) -> None:
+        self.send_required_actions_email(subject, ["UPDATE_PASSWORD"])
+
+    def logout_user(self, subject: str) -> None:
+        """Ends every active Keycloak SSO session for this user (defense in
+        depth for account deactivation -- app-DB is_active is what actually
+        makes deactivation take effect on the next request; this stops
+        *future* refreshes/re-logins, not an already-issued access token
+        before its own exp). Best-effort, same shape as set_enabled."""
+        try:
+            response = self._http_client.post(
+                f"{self._base_url}/admin/realms/{self._realm}/users/{subject}/logout",
+                headers=self._headers(),
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise KeycloakAdminError(f"logout_user({subject!r}) failed: {exc}") from exc
 
     def delete_user(self, subject: str) -> None:
         """Compensation only -- called to undo a Keycloak create_user() when
