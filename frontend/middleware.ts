@@ -19,7 +19,11 @@ export async function middleware(request: NextRequest) {
       request.nextUrl.pathname + request.nextUrl.search,
       baseUrl
     );
-    const signInUrl = new URL("/api/auth/signin", baseUrl);
+    // authOptions.pages.signIn (lib/auth.ts) points at this app's own /login
+    // page, not NextAuth's built-in one -- redirecting to /api/auth/signin
+    // here would land the browser on a page NextAuth never renders once a
+    // custom signIn page is configured, showing up as blank.
+    const signInUrl = new URL("/login", baseUrl);
     signInUrl.searchParams.set("callbackUrl", callbackUrl.toString());
     return NextResponse.redirect(signInUrl);
   }

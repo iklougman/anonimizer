@@ -20,7 +20,7 @@ describe("middleware", () => {
     const response = await middleware(request);
 
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toContain("/api/auth/signin");
+    expect(response.headers.get("location")).toContain("/login");
   });
 
   it("allows the request through when a token is present", async () => {
@@ -42,7 +42,7 @@ describe("middleware", () => {
     const response = await middleware(request);
 
     expect(response.status).toBe(307);
-    expect(response.headers.get("location")).toContain("/api/auth/signin");
+    expect(response.headers.get("location")).toContain("/login");
   });
 
   it("matcher excludes the NextAuth API routes", () => {
