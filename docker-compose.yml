@@ -218,7 +218,7 @@ services:
   # postgres, keycloak, ollama, and ops_admin are deliberately given no
   # Traefik labels -- ops_admin especially must stay unreachable from here.
   traefik:
-    image: traefik:v3.1
+    image: traefik:v3.5
     command:
       - "--providers.docker=true"
       - "--providers.docker.exposedbydefault=false"
